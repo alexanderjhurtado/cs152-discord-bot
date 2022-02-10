@@ -7,6 +7,7 @@ import logging
 import re
 import requests
 from report import Report
+import spacy
 
 # Set up logging to the console
 logger = logging.getLogger('discord')
@@ -34,6 +35,8 @@ class ModBot(discord.Client):
         self.mod_channels = {} # Map from guild to the mod channel id for that guild
         self.reports = {} # Map from user IDs to the state of their report
         self.perspective_key = key
+        self.named_entity_model = spacy.load('en_core_web_sm')
+        self.mentioned_entities = {}
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
@@ -106,8 +109,17 @@ class ModBot(discord.Client):
         mod_channel = self.mod_channels[message.guild.id]
         await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
 
+        # Forward the message's scores to mod channel
         scores = self.eval_text(message)
         await mod_channel.send(self.code_format(json.dumps(scores, indent=2)))
+
+        # Identify targeted entities and forward to mod channel
+        entities = self.eval_entities(message)
+        targeted_entities = self.update_targeted_entities(entities, scores)
+        if len(targeted_entities) > 0:
+            await mod_channel.send("‼️ Targeted harassment detected! ‼️\nHere's a list of targeted entities: ")
+            await mod_channel.send(self.code_format(json.dumps(targeted_entities, indent=2)))
+        
 
     def eval_text(self, message):
         '''
@@ -134,6 +146,52 @@ class ModBot(discord.Client):
             scores[attr] = response_dict["attributeScores"][attr]["summaryScore"]["value"]
 
         return scores
+
+    def eval_entities(self, message):
+        '''
+        Given a message, evaluate the text for named entities and returns a set of their referred names.
+        '''
+        named_entities = set()
+        entity_doc = self.named_entity_model(message.content)
+        for entity in entity_doc.ents:
+            if entity.label_ == "PERSON" or entity.label_ == "NORP":
+                named_entities.add(entity.text)
+        return named_entities
+
+    def update_targeted_entities(self, entity_set, perspective_scores):
+        '''
+        Given a set of entities and the Perspective scores of their originator message, update each entity's
+        targeted harassment score and return a list of entities whose harassment score is greater than some threshold
+        -- this collection represents the entities who are being targeted with harasssment.
+        '''
+        TOTAL_SCORE_THRESHOLD = 10
+        INDIVIDUAL_SCORE_THRESHOLD = 0.6
+        for entity in entity_set:
+            curr_score = self.mentioned_entities.get(entity, 0)
+            curr_score += self.threshold_get(perspective_scores, 'SEVERE_TOXICITY', INDIVIDUAL_SCORE_THRESHOLD)
+            curr_score += self.threshold_get(perspective_scores, 'TOXICITY', INDIVIDUAL_SCORE_THRESHOLD)
+            curr_score += self.threshold_get(perspective_scores, 'IDENTITY_ATTACK', INDIVIDUAL_SCORE_THRESHOLD)
+            curr_score += self.threshold_get(perspective_scores, 'THREAT', INDIVIDUAL_SCORE_THRESHOLD)
+            self.mentioned_entities[entity] = curr_score
+        return self.identify_targeted_entities(threshold=TOTAL_SCORE_THRESHOLD)
+
+    def threshold_get(self, dictionary, key, threshold):
+        '''
+        Grabs the value of the given key from the given dictionary as long as that value is at least the given threshold.
+        If the value is not at least the threshold, then this method will return 0.
+        '''
+        return dictionary[key] if dictionary[key] >= threshold else 0
+
+    def identify_targeted_entities(self, threshold):
+        '''
+        Determines the set of entities whose total harassment score is greater than the given threshold and returns
+        those entities as a list. This list represents the set of entities who are being targeted with harassment.
+        '''
+        targeted_entities = []
+        for entity, harassment_score in self.mentioned_entities.items():
+            if harassment_score >= threshold:
+                targeted_entities.append(entity)
+        return targeted_entities
     
     def code_format(self, text):
         return "```" + text + "```"
