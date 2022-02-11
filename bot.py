@@ -9,6 +9,9 @@ import requests
 from report import Report
 import spacy
 
+TOTAL_SCORE_THRESHOLD = 7.5
+INDIVIDUAL_SCORE_THRESHOLD = 0.625
+
 # Set up logging to the console
 logger = logging.getLogger('discord')
 logger.setLevel(logging.DEBUG)
@@ -36,7 +39,8 @@ class ModBot(discord.Client):
         self.reports = {} # Map from user IDs to the state of their report
         self.perspective_key = key
         self.named_entity_model = spacy.load('en_core_web_sm')
-        self.mentioned_entities = {}
+        self.entity_scores = {}
+        self.entity_mentions = {}
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
@@ -104,22 +108,28 @@ class ModBot(discord.Client):
         # Only handle messages sent in the "group-#" channel
         if not message.channel.name == f'group-{self.group_num}':
             return 
-        
-        # Forward the message to the mod channel
+
+        # grab mod channel in case we need to forward info there
         mod_channel = self.mod_channels[message.guild.id]
-        await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
 
-        # Forward the message's scores to mod channel
+        # extract Perspective score and entity mentions from message
         scores = self.eval_text(message)
-        await mod_channel.send(self.code_format(json.dumps(scores, indent=2)))
-
-        # Identify targeted entities and forward to mod channel
         entities = self.eval_entities(message)
-        targeted_entities = self.update_targeted_entities(entities, scores)
-        if len(targeted_entities) > 0:
-            await mod_channel.send("‼️ Targeted harassment detected! ‼️\nHere's a list of targeted entities: ")
-            await mod_channel.send(self.code_format(json.dumps(targeted_entities, indent=2)))
-        
+
+        # Forward message to mod channel if it's harassment-like
+        if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in scores.values()):
+            embed = discord.Embed(
+                title=f'Potentially abusive message detected\n', 
+                description=f'<@{message.author.id}> said:\n"{self.truncate_string(message.content)}" [[link]({message.jump_url})]',
+                color=0xED1500
+            )
+            await mod_channel.send(embed=embed)
+
+            # Identify any targeted entities and forward warning to mod channel
+            targeted_entities = self.update_targeted_entities(entities, scores, message)
+            if len(targeted_entities) > 0:
+                await mod_channel.send("‼️ Possible harassment campaign detected ‼️\nHere's a list of harassment targets: ")
+                await mod_channel.send(self.code_format(json.dumps({'targeted_entities': targeted_entities }, indent=2)))
 
     def eval_text(self, message):
         '''
@@ -132,9 +142,8 @@ class ModBot(discord.Client):
             'comment': {'text': message.content},
             'languages': ['en'],
             'requestedAttributes': {
-                                    'SEVERE_TOXICITY': {}, 'PROFANITY': {},
-                                    'IDENTITY_ATTACK': {}, 'THREAT': {},
-                                    'TOXICITY': {}, 'FLIRTATION': {}
+                                    'SEVERE_TOXICITY': {}, 'IDENTITY_ATTACK': {}, 
+                                    'THREAT': {}, 'TOXICITY': {}, 
                                 },
             'doNotStore': True
         }
@@ -158,22 +167,42 @@ class ModBot(discord.Client):
                 named_entities.add(entity.text)
         return named_entities
 
-    def update_targeted_entities(self, entity_set, perspective_scores):
+    def update_targeted_entities(self, entity_set, perspective_scores, message):
         '''
         Given a set of entities and the Perspective scores of their originator message, update each entity's
         targeted harassment score and return a list of entities whose harassment score is greater than some threshold
         -- this collection represents the entities who are being targeted with harasssment.
         '''
-        TOTAL_SCORE_THRESHOLD = 10
-        INDIVIDUAL_SCORE_THRESHOLD = 0.6
         for entity in entity_set:
-            curr_score = self.mentioned_entities.get(entity, 0)
+            curr_score = self.entity_scores.get(entity, 0)
             curr_score += self.threshold_get(perspective_scores, 'SEVERE_TOXICITY', INDIVIDUAL_SCORE_THRESHOLD)
             curr_score += self.threshold_get(perspective_scores, 'TOXICITY', INDIVIDUAL_SCORE_THRESHOLD)
             curr_score += self.threshold_get(perspective_scores, 'IDENTITY_ATTACK', INDIVIDUAL_SCORE_THRESHOLD)
             curr_score += self.threshold_get(perspective_scores, 'THREAT', INDIVIDUAL_SCORE_THRESHOLD)
-            self.mentioned_entities[entity] = curr_score
+            self.entity_scores[entity] = curr_score
+            self.entity_mentions[entity] = self.entity_mentions.get(entity, []) + [
+                {'message_id': message.id, 'author': message.author.name, 'content': message.content}
+            ]
         return self.identify_targeted_entities(threshold=TOTAL_SCORE_THRESHOLD)
+
+    def identify_targeted_entities(self, threshold):
+        '''
+        Determines the set of entities whose total harassment score is greater than the given threshold and returns
+        those entities as a list. This list represents the set of entities who are being targeted with harassment.
+        '''
+        targeted_entities = []
+        for entity, harassment_score in self.entity_scores.items():
+            if harassment_score >= threshold:
+                mentions = self.entity_mentions[entity]
+                targeted_entities.append({ 
+                    'name': entity, 
+                    'total_harassment_score': harassment_score,
+                    'avg_harassment_score': float(harassment_score / len(mentions)),
+                    'mentions': mentions, })
+        return targeted_entities
+    
+    def code_format(self, text):
+        return "```" + text + "```"
 
     def threshold_get(self, dictionary, key, threshold):
         '''
@@ -182,19 +211,13 @@ class ModBot(discord.Client):
         '''
         return dictionary[key] if dictionary[key] >= threshold else 0
 
-    def identify_targeted_entities(self, threshold):
+    def truncate_string(self, string):
         '''
-        Determines the set of entities whose total harassment score is greater than the given threshold and returns
-        those entities as a list. This list represents the set of entities who are being targeted with harassment.
+        Truncate string to a certain length and add ellipsis if appropriate
         '''
-        targeted_entities = []
-        for entity, harassment_score in self.mentioned_entities.items():
-            if harassment_score >= threshold:
-                targeted_entities.append(entity)
-        return targeted_entities
-    
-    def code_format(self, text):
-        return "```" + text + "```"
+        TRUNCATION_LENGTH = 325
+        return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
+
             
         
 client = ModBot(perspective_key)
