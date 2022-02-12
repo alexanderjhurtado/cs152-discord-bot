@@ -9,6 +9,7 @@ import requests
 from report import Report
 import spacy
 
+
 TOTAL_SCORE_THRESHOLD = 7.5
 INDIVIDUAL_SCORE_THRESHOLD = 0.625
 
