@@ -1,6 +1,7 @@
 # bot.py
 import discord
 from discord.ext import commands
+from discord.ui import View
 import os
 import json
 import logging
@@ -48,14 +49,12 @@ class ModBot(discord.Client):
         for guild in self.guilds:
             print(f' - {guild.name}')
         print('Press Ctrl-C to quit.')
-
         # Parse the group number out of the bot's name
         match = re.search('[gG]roup (\d+) [bB]ot', self.user.name)
         if match:
             self.group_num = match.group(1)
         else:
             raise Exception("Group number not found in bot's name. Name format should be \"Group # Bot\".")
-        
         # Find the mod channel in each guild that this bot should report to
         for guild in self.guilds:
             for channel in guild.text_channels:
@@ -70,7 +69,6 @@ class ModBot(discord.Client):
         # Ignore messages from us 
         if message.author.id == self.user.id:
             return
-        
         # Check if this message was sent in a server ("guild") or if it's a DM
         if message.guild:
             await self.handle_channel_message(message)
@@ -84,23 +82,18 @@ class ModBot(discord.Client):
             reply += "Use the `cancel` command to cancel the report process.\n"
             await message.channel.send(reply)
             return
-
         author_id = message.author.id
         responses = []
-
         # Only respond to messages if they're part of a reporting flow
         if author_id not in self.reports and not message.content.startswith(Report.START_KEYWORD):
             return
-
         # If we don't currently have an active report for this user, add one
         if author_id not in self.reports:
             self.reports[author_id] = Report(self)
-        
         # Let the report class handle this message; forward all the messages it returns to uss
         responses = await self.reports[author_id].handle_message(message)
         for r in responses:
             await message.channel.send(r)
-
         # If the report is complete or cancelled, remove it from our map
         if self.reports[author_id].report_complete():
             self.reports.pop(author_id)
@@ -109,14 +102,11 @@ class ModBot(discord.Client):
         # Only handle messages sent in the "group-#" channel
         if not message.channel.name == f'group-{self.group_num}':
             return 
-
         # grab mod channel in case we need to forward info there
         mod_channel = self.mod_channels[message.guild.id]
-
         # extract Perspective score and entity mentions from message
         scores = self.eval_text(message)
         entities = self.eval_entities(message)
-
         # Forward message to mod channel if it's harassment-like
         if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in scores.values()):
             embed = discord.Embed(
@@ -124,8 +114,7 @@ class ModBot(discord.Client):
                 description=f'<@{message.author.id}> said:\n"{self.truncate_string(message.content)}" [[link]({message.jump_url})]',
                 color=0xED1500
             )
-            await mod_channel.send(embed=embed)
-
+            await mod_channel.send(embed=embed, view=AbuseWarningView(message))
             # Identify any targeted entities and forward warning to mod channel
             targeted_entities = self.update_targeted_entities(entities, scores, message)
             if len(targeted_entities) > 0:
@@ -137,7 +126,6 @@ class ModBot(discord.Client):
         Given a message, forwards the message to Perspective and returns a dictionary of scores.
         '''
         PERSPECTIVE_URL = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze'
-
         url = PERSPECTIVE_URL + '?key=' + self.perspective_key
         data_dict = {
             'comment': {'text': message.content},
@@ -150,11 +138,9 @@ class ModBot(discord.Client):
         }
         response = requests.post(url, data=json.dumps(data_dict))
         response_dict = response.json()
-
         scores = {}
         for attr in response_dict["attributeScores"]:
             scores[attr] = response_dict["attributeScores"][attr]["summaryScore"]["value"]
-
         return scores
 
     def eval_entities(self, message):
@@ -219,6 +205,22 @@ class ModBot(discord.Client):
         TRUNCATION_LENGTH = 325
         return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
 
+class AbuseWarningView(View):
+    def __init__(self, message):
+        super().__init__()
+        self.message = message
+
+    @discord.ui.button(label='Delete message', style=discord.ButtonStyle.gray)
+    async def delete_message_callback(self, button, interaction):
+        button.label = 'Message deleted'
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+
+    @discord.ui.button(label='Kick user', style=discord.ButtonStyle.red)
+    async def kick_user_callback(self, button, interaction):
+        button.label = 'User kicked'
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
             
         
 client = ModBot(perspective_key)
