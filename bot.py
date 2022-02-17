@@ -9,6 +9,7 @@ import re
 import requests
 from report import Report
 import spacy
+from uni2ascii import uni2ascii
 
 
 TOTAL_SCORE_THRESHOLD = 7.5
@@ -45,7 +46,7 @@ class ModBot(discord.Client):
         self.entity_mentions = {}
 
     async def on_ready(self):
-        print(f'{self.user.name} has connected to Discord! It is these guilds:')
+        print(f'{self.user.name} has connected to Discord! It\'s in these guilds:')
         for guild in self.guilds:
             print(f' - {guild.name}')
         print('Press Ctrl-C to quit.')
@@ -75,6 +76,9 @@ class ModBot(discord.Client):
         else:
             await self.handle_dm(message)
 
+    async def on_message_edit(self, message_before, message_after):
+        await self.handle_channel_message(message_after)
+
     async def handle_dm(self, message):
         # Handle a help message
         if message.content == Report.HELP_KEYWORD:
@@ -102,33 +106,28 @@ class ModBot(discord.Client):
         # Only handle messages sent in the "group-#" channel
         if not message.channel.name == f'group-{self.group_num}':
             return 
-        # grab mod channel in case we need to forward info there
         mod_channel = self.mod_channels[message.guild.id]
-        # extract Perspective score and entity mentions from message
-        scores = self.eval_text(message)
-        entities = self.eval_entities(message)
-        # Forward message to mod channel if it's harassment-like
+        # ASCII-fy then extract Perspective score and entity mentions from message
+        message_content = uni2ascii(message.content)
+        scores = self.eval_text(message_content)
+        entities = self.eval_entities(message_content)
+        # Additional work for messages that are harassment-like
         if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in scores.values()):
-            embed = discord.Embed(
-                title=f'Potentially abusive message detected\n', 
-                description=f'<@{message.author.id}> said:\n"{self.truncate_string(message.content)}" [[link]({message.jump_url})]',
-                color=0xED1500
-            )
-            await mod_channel.send(embed=embed, view=AbuseWarningView(message))
-            # Identify any targeted entities and forward warning to mod channel
+            # Forward warning to mod channel about harassing messages
+            await mod_channel.send(embed=AbuseWarningEmbed(message), view=AbuseWarningView(message))
+            # Identify any entities that are being targeted and forward warning to mod channel
             targeted_entities = self.update_targeted_entities(entities, scores, message)
             if len(targeted_entities) > 0:
-                await mod_channel.send("‼️ Possible harassment campaign detected ‼️\nHere's a list of harassment targets: ")
-                await mod_channel.send(self.code_format(json.dumps({'targeted_entities': targeted_entities }, indent=2)))
+                await mod_channel.send(embed=CampaignWarningEmbed(targeted_entities))
 
     def eval_text(self, message):
         '''
-        Given a message, forwards the message to Perspective and returns a dictionary of scores.
+        Given a message string, forwards the message to Perspective and returns a dictionary of scores.
         '''
         PERSPECTIVE_URL = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze'
         url = PERSPECTIVE_URL + '?key=' + self.perspective_key
         data_dict = {
-            'comment': {'text': message.content},
+            'comment': {'text': message},
             'languages': ['en'],
             'requestedAttributes': {
                                     'SEVERE_TOXICITY': {}, 'IDENTITY_ATTACK': {}, 
@@ -145,10 +144,10 @@ class ModBot(discord.Client):
 
     def eval_entities(self, message):
         '''
-        Given a message, evaluate the text for named entities and returns a set of their referred names.
+        Given a message string, evaluate the text for named entities and returns a set of their referred names.
         '''
         named_entities = set()
-        entity_doc = self.named_entity_model(message.content)
+        entity_doc = self.named_entity_model(message)
         for entity in entity_doc.ents:
             if entity.label_ == "PERSON" or entity.label_ == "NORP":
                 named_entities.add(entity.text)
@@ -187,9 +186,6 @@ class ModBot(discord.Client):
                     'avg_harassment_score': float(harassment_score / len(mentions)),
                     'mentions': mentions, })
         return targeted_entities
-    
-    def code_format(self, text):
-        return "```" + text + "```"
 
     def threshold_get(self, dictionary, key, threshold):
         '''
@@ -198,12 +194,7 @@ class ModBot(discord.Client):
         '''
         return dictionary[key] if dictionary[key] >= threshold else 0
 
-    def truncate_string(self, string):
-        '''
-        Truncate string to a certain length and add ellipsis if appropriate
-        '''
-        TRUNCATION_LENGTH = 325
-        return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
+
 
 class AbuseWarningView(View):
     def __init__(self, message):
@@ -214,14 +205,39 @@ class AbuseWarningView(View):
     async def delete_message_callback(self, button, interaction):
         button.label = 'Message deleted'
         button.disabled = True
+        await self.message.delete()
         await interaction.response.edit_message(view=self)
 
     @discord.ui.button(label='Kick user', style=discord.ButtonStyle.red)
     async def kick_user_callback(self, button, interaction):
         button.label = 'User kicked'
         button.disabled = True
+        await self.message.channel.send(f'{self.message.author.name} has been kicked.') # simulate user being kicked
         await interaction.response.edit_message(view=self)
-            
+
+class AbuseWarningEmbed(discord.Embed):
+    def __init__(self, message):
+        title = 'Potentially abusive message detected'
+        description = f'<@{message.author.id}> said:\n"{self.truncate_string(message.content)}" [[link]({message.jump_url})]'
+        super().__init__(title=title, description=description, color=0xED1500)
+
+    def truncate_string(self, string):
+        '''
+        Truncate string to a certain length and add ellipsis if appropriate
+        '''
+        TRUNCATION_LENGTH = 325
+        return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
+
+class CampaignWarningEmbed(discord.Embed):
+    def __init__(self, targeted_entities):
+        title = '‼️ Possible harassment campaign detected ‼️'
+        description = self.code_format(json.dumps({'targeted_entities': targeted_entities }, indent=2))
+        super().__init__(title=title, description=description, color=0xED1500)
+
+    def code_format(self, text):
+        return "```" + text + "```"
+
+
         
 client = ModBot(perspective_key)
 client.run(discord_token)
