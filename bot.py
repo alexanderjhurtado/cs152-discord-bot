@@ -19,7 +19,7 @@ handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w'
 handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
 logger.addHandler(handler)
 
-# There should be a file called 'token.json' inside the same folder as this file
+# There should be a file called 'tokens.json' inside the same folder as this file
 token_path = 'tokens.json'
 if not os.path.isfile(token_path):
     raise Exception(f"{token_path} not found!")
@@ -34,7 +34,7 @@ class ModBot(discord.Client):
     def __init__(self, key):
         intents = discord.Intents.default()
         super().__init__(command_prefix='.', intents=intents)
-        self.group_num = None   
+        self.group_num = None
         self.mod_channels = {} # Map from guild to the mod channel id for that guild
         self.reports = {} # Map from user IDs to the state of their report
         self.perspective_key = key
@@ -60,10 +60,10 @@ class ModBot(discord.Client):
 
     async def on_message(self, message):
         '''
-        This function is called whenever a message is sent in a channel that the bot can see (including DMs). 
-        Currently the bot is configured to only handle messages that are sent over DMs or in your group's "group-#" channel. 
+        This function is called whenever a message is sent in a channel that the bot can see (including DMs).
+        Currently the bot is configured to only handle messages that are sent over DMs or in your group's "group-#" channel.
         '''
-        # Ignore messages from us 
+        # Ignore messages from us
         if message.author.id == self.user.id:
             return
         # Check if this message was sent in a server ("guild") or if it's a DM
@@ -101,7 +101,7 @@ class ModBot(discord.Client):
     async def handle_channel_message(self, message):
         # Only handle messages sent in the "group-#" channel
         if not message.channel.name == f'group-{self.group_num}':
-            return 
+            return
         mod_channel = self.mod_channels[message.guild.id]
         # ASCII-fy then extract Perspective score and entity mentions from message
         message_content = uni2ascii(message.content)
@@ -122,7 +122,7 @@ class ModBot(discord.Client):
             'comment': {'text': message},
             'languages': ['en'],
             'requestedAttributes': {
-                                    'SEVERE_TOXICITY': {}, 'IDENTITY_ATTACK': {}, 
+                                    'SEVERE_TOXICITY': {}, 'IDENTITY_ATTACK': {},
                                     'THREAT': {}, 'TOXICITY': {}, 'SEXUALLY_EXPLICIT': {},
                                 },
             'doNotStore': True
@@ -177,6 +177,6 @@ class AbuseWarningEmbed(discord.Embed):
 #         return "```" + text + "```"
 
 
-        
+
 client = ModBot(perspective_key)
 client.run(discord_token)
