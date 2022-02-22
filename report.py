@@ -5,6 +5,7 @@ import re
 class State(Enum):
     REPORT_START = auto()
     AWAITING_MESSAGE = auto()
+    MESSAGE_CONFIRMATION = auto()
     MESSAGE_IDENTIFIED = auto()
     REPORT_COMPLETE = auto()
     IMMINENT_DANGER = auto()
@@ -14,13 +15,31 @@ class Report:
     START_KEYWORD = "report"
     CANCEL_KEYWORD = "cancel"
     HELP_KEYWORD = "help"
+    INFO_KEYWORD = "info"
     YES_KEYWORD = "yes"
     NO_KEYWORD = "no"
+
+    ABUSE_TYPES = [
+        "Bullying",
+        "Hate Speech",
+        "Sexual Harrassment",
+        "Revealing Personal Information",
+        "Advocating Violence",
+        "Other"
+    ]
 
     def __init__(self, client):
         self.state = State.REPORT_START
         self.client = client
         self.message = None
+        self.abuse_type = None
+
+    def select_abuse_message(self):
+        reply = "Please select which abuse type best matches your report (reply with the corresponding number):\n"
+        for i, abuse_type in enumerate(self.ABUSE_TYPES):
+            reply += f"{i+1}. {abuse_type}\n"
+        reply += "\nFor more information about these categories, type `info`."
+        return reply
 
     async def handle_message(self, message):
         '''
@@ -58,11 +77,26 @@ class Report:
                 return ["It seems this message was deleted or never existed. Please try again or say `cancel` to cancel."]
 
             # Here we've found the message - it's up to you to decide what to do next!
-            self.state = State.MESSAGE_IDENTIFIED
-            return ["I found this message:", "```" + message.author.name + ": " + message.content + "```", \
-                    "Are you in imminent danger from this message? Reply `yes` or `no`."]
+            self.state = State.MESSAGE_CONFIRMATION
+            self.message = message
+            return [
+                "I found this message:", "```" + message.author.name + ": " + message.content + "```", \
+                "Is this the content you wish to report? Reply `yes` or `no`."
+            ]
+
+        if self.state == State.MESSAGE_CONFIRMATION:
+            if message.content == self.YES_KEYWORD:
+                self.state = State.MESSAGE_IDENTIFIED
+                return ["Thanks for confirming.", \
+                        "Are you in imminent danger from this message? Reply `yes` or `no`."]
+            if message.content == self.NO_KEYWORD:
+                self.state = State.AWAITING_MESSAGE
+                self.message = None
+                return ["Sorry we weren't able to find that material. Please submit another link to the content you wish to report."]
+
 
         if self.state == State.MESSAGE_IDENTIFIED:
+            # Checks if the user is in imminent danger
             if message.content == self.YES_KEYWORD:
                 self.state = State.IMMINENT_DANGER
                 reply = "Please immediately alert the local authorities by dialing 911.\n\n"
@@ -70,17 +104,37 @@ class Report:
                 return [reply]
             if message.content == self.NO_KEYWORD:
                 self.state = State.SELECT_ABUSE
+                return [self.select_abuse_message()]
 
         if self.state == State.IMMINENT_DANGER:
+            # Allows the user to send relevant message info to the local authorities
+            # Presents the user with potential abuse types to choose from
             if message.content in [self.YES_KEYWORD, self.NO_KEYWORD]:
                 self.state = State.SELECT_ABUSE
-                reply = ""
+                imminent_danger_reply = ""
                 if message.content == self.YES_KEYWORD:
-                    reply += "All relevant information has been sent to the local authorities. \n"
-                    reply += "In the meantime, please help us assess the reported content.\n\n"
+                    imminent_danger_reply += "All relevant information has been sent to the local authorities. \n"
+                    imminent_danger_reply += "In the meantime, please help us assess the reported content.\n\n"
                 else:
-                    reply += "Please help us assess the reported content.\n\n"
-                print(reply)
+                    imminent_danger_reply += "Please help us assess the reported content.\n\n"
+
+                select_abuse_reply = self.select_abuse_message()
+                return [imminent_danger_reply, select_abuse_reply]
+
+        if self.state == State.SELECT_ABUSE:
+            if message.content == self.INFO_KEYWORD:
+                return ["Information about Abuse types..."]
+            if message.content in [str(i+1) for i in range(len(self.ABUSE_TYPES))]:
+                self.abuse_type = self.ABUSE_TYPES[int(message.content) - 1]
+                self.state = State.REPORT_COMPLETE
+                reply = "Thank you for reporting.\n"
+                reply += f"The following content has been flagged for review as `{self.abuse_type}` material:\n"
+                reply += f"```{self.message.author.name}: {self.message.content}```\n"
+                reply += "Our content moderation team will review this content and assess "
+                reply += "next steps, potentially including removing content and contacting "
+                reply += "local authorities.\n\n"
+                reply += "In the meantime, consider blocking the user to prevent "
+                reply += "further exposure to their content."
                 return [reply]
 
         return []
