@@ -8,11 +8,8 @@ import logging
 import re
 import requests
 from report import Report
-import spacy
 from uni2ascii import uni2ascii
 
-
-TOTAL_SCORE_THRESHOLD = 7.5
 INDIVIDUAL_SCORE_THRESHOLD = 0.625
 
 # Set up logging to the console
@@ -41,7 +38,6 @@ class ModBot(discord.Client):
         self.mod_channels = {} # Map from guild to the mod channel id for that guild
         self.reports = {} # Map from user IDs to the state of their report
         self.perspective_key = key
-        self.named_entity_model = spacy.load('en_core_web_sm')
         self.entity_scores = {}
         self.entity_mentions = {}
 
@@ -110,15 +106,11 @@ class ModBot(discord.Client):
         # ASCII-fy then extract Perspective score and entity mentions from message
         message_content = uni2ascii(message.content)
         scores = self.eval_text(message_content)
-        entities = self.eval_entities(message_content)
         # Additional work for messages that are harassment-like
         if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in scores.values()):
             # Forward warning to mod channel about harassing messages
             await mod_channel.send(embed=AbuseWarningEmbed(message), view=AbuseWarningView(message))
-            # Identify any entities that are being targeted and forward warning to mod channel
-            targeted_entities = self.update_targeted_entities(entities, scores, message)
-            if len(targeted_entities) > 0:
-                await mod_channel.send(embed=CampaignWarningEmbed(targeted_entities))
+            # TODO: Identify any entities that are being targeted and forward warning to mod channel
 
     def eval_text(self, message):
         '''
@@ -131,7 +123,7 @@ class ModBot(discord.Client):
             'languages': ['en'],
             'requestedAttributes': {
                                     'SEVERE_TOXICITY': {}, 'IDENTITY_ATTACK': {}, 
-                                    'THREAT': {}, 'TOXICITY': {}, 
+                                    'THREAT': {}, 'TOXICITY': {}, 'SEXUALLY_EXPLICIT': {},
                                 },
             'doNotStore': True
         }
@@ -141,59 +133,6 @@ class ModBot(discord.Client):
         for attr in response_dict["attributeScores"]:
             scores[attr] = response_dict["attributeScores"][attr]["summaryScore"]["value"]
         return scores
-
-    def eval_entities(self, message):
-        '''
-        Given a message string, evaluate the text for named entities and returns a set of their referred names.
-        '''
-        named_entities = set()
-        entity_doc = self.named_entity_model(message)
-        for entity in entity_doc.ents:
-            if entity.label_ == "PERSON" or entity.label_ == "NORP":
-                named_entities.add(entity.text)
-        return named_entities
-
-    def update_targeted_entities(self, entity_set, perspective_scores, message):
-        '''
-        Given a set of entities and the Perspective scores of their originator message, update each entity's
-        targeted harassment score and return a list of entities whose harassment score is greater than some threshold
-        -- this collection represents the entities who are being targeted with harasssment.
-        '''
-        for entity in entity_set:
-            curr_score = self.entity_scores.get(entity, 0)
-            curr_score += self.threshold_get(perspective_scores, 'SEVERE_TOXICITY', INDIVIDUAL_SCORE_THRESHOLD)
-            curr_score += self.threshold_get(perspective_scores, 'TOXICITY', INDIVIDUAL_SCORE_THRESHOLD)
-            curr_score += self.threshold_get(perspective_scores, 'IDENTITY_ATTACK', INDIVIDUAL_SCORE_THRESHOLD)
-            curr_score += self.threshold_get(perspective_scores, 'THREAT', INDIVIDUAL_SCORE_THRESHOLD)
-            self.entity_scores[entity] = curr_score
-            self.entity_mentions[entity] = self.entity_mentions.get(entity, []) + [
-                {'message_id': message.id, 'author': message.author.name, 'content': message.content}
-            ]
-        return self.identify_targeted_entities(threshold=TOTAL_SCORE_THRESHOLD)
-
-    def identify_targeted_entities(self, threshold):
-        '''
-        Determines the set of entities whose total harassment score is greater than the given threshold and returns
-        those entities as a list. This list represents the set of entities who are being targeted with harassment.
-        '''
-        targeted_entities = []
-        for entity, harassment_score in self.entity_scores.items():
-            if harassment_score >= threshold:
-                mentions = self.entity_mentions[entity]
-                targeted_entities.append({ 
-                    'name': entity, 
-                    'total_harassment_score': harassment_score,
-                    'avg_harassment_score': float(harassment_score / len(mentions)),
-                    'mentions': mentions, })
-        return targeted_entities
-
-    def threshold_get(self, dictionary, key, threshold):
-        '''
-        Grabs the value of the given key from the given dictionary as long as that value is at least the given threshold.
-        If the value is not at least the threshold, then this method will return 0.
-        '''
-        return dictionary[key] if dictionary[key] >= threshold else 0
-
 
 
 class AbuseWarningView(View):
@@ -228,14 +167,14 @@ class AbuseWarningEmbed(discord.Embed):
         TRUNCATION_LENGTH = 325
         return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
 
-class CampaignWarningEmbed(discord.Embed):
-    def __init__(self, targeted_entities):
-        title = '‼️ Possible harassment campaign detected ‼️'
-        description = self.code_format(json.dumps({'targeted_entities': targeted_entities }, indent=2))
-        super().__init__(title=title, description=description, color=0xED1500)
+# class CampaignWarningEmbed(discord.Embed):
+#     def __init__(self, targeted_entities):
+#         title = '‼️ Possible harassment campaign detected ‼️'
+#         description = self.code_format(json.dumps({'targeted_entities': targeted_entities }, indent=2))
+#         super().__init__(title=title, description=description, color=0xED1500)
 
-    def code_format(self, text):
-        return "```" + text + "```"
+#     def code_format(self, text):
+#         return "```" + text + "```"
 
 
         
