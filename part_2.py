@@ -6,6 +6,7 @@ import math
 TOTAL_SCORE_THRESHOLD = 7.5
 INDIVIDUAL_SCORE_THRESHOLD = 0.625
 TF_IDF_SURFACING_THRESHOLD = 0.08
+HARASSMENT_SCORE_THRESHOLD = 0.5 # TODO: MODIFY TO ACTUAL VALUE
 
 class TargetedEntityDetector:
     def __init__(self):
@@ -29,6 +30,19 @@ class TargetedEntityDetector:
                 tf_idf_scores = self.compute_tf_idf_by_token(mentions)
                 return [token for token, score in tf_idf_scores.items() if score > TF_IDF_SURFACING_THRESHOLD]
 
+
+    def eval_reported_message(self, message):
+        perspective_scores = self.eval_text(message)
+        targeted_entities = self.identify_targeted_entities(threshold=TOTAL_SCORE_THRESHOLD)
+        _, tokenized_message = self.eval_entities(message)
+        identified_harassment_entities = []
+        for entity_obj in targeted_entities:
+            entity = entity_obj['name']
+            if entity in tokenized_message:
+                identified_harassment_entities.append(entity_obj)
+        return perspective_scores, identified_harassment_entities
+
+
     def eval_text(self, message):
         '''
         Given a message string, forwards the message to Perspective and returns a dictionary of scores.
@@ -39,7 +53,7 @@ class TargetedEntityDetector:
             'comment': {'text': message},
             'languages': ['en'],
             'requestedAttributes': {
-                                    'SEVERE_TOXICITY': {}, 'IDENTITY_ATTACK': {}, 
+                                    'SEVERE_TOXICITY': {}, 'IDENTITY_ATTACK': {},
                                     'THREAT': {}, 'TOXICITY': {}, 'SEXUALLY_EXPLICIT': {},
                                 },
             'doNotStore': True
@@ -96,8 +110,8 @@ class TargetedEntityDetector:
         for entity, harassment_score in self.entity_scores.items():
             if harassment_score >= threshold:
                 mentions = self.entity_mentions[entity]
-                targeted_entities.append({ 
-                    'name': entity, 
+                targeted_entities.append({
+                    'name': entity,
                     'total_harassment_score': harassment_score,
                     'avg_harassment_score': float(harassment_score / len(mentions)),
                     'mentions': mentions, })

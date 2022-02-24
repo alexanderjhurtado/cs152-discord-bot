@@ -32,7 +32,7 @@ class Report:
         self.state = State.REPORT_START
         self.client = client
         self.message = None
-        self.imminent_danger = False
+        self.report_imminent_danger = False
         self.abuse_type = None
 
     def select_abuse_message(self):
@@ -114,6 +114,7 @@ class Report:
                 self.state = State.SELECT_ABUSE
                 imminent_danger_reply = ""
                 if message.content == self.YES_KEYWORD:
+                    self.report_imminent_danger = True
                     imminent_danger_reply += "We will process and send the message information to the local authorities.\n"
                     imminent_danger_reply += "In the meantime, please help us assess the reported content.\n\n"
                 else:
