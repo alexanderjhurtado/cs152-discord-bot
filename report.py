@@ -7,9 +7,10 @@ class State(Enum):
     AWAITING_MESSAGE = auto()
     MESSAGE_CONFIRMATION = auto()
     MESSAGE_IDENTIFIED = auto()
-    REPORT_COMPLETE = auto()
     IMMINENT_DANGER = auto()
     SELECT_ABUSE = auto()
+    REPORT_SENT = auto()
+    REPORT_COMPLETE = auto()
 
 class Report:
     START_KEYWORD = "report"
@@ -28,9 +29,10 @@ class Report:
         "Other"
     ]
 
-    def __init__(self, client):
+    def __init__(self, client, author):
         self.state = State.REPORT_START
         self.client = client
+        self.author = author
         self.message = None
         self.report_imminent_danger = False
         self.abuse_type = None
@@ -125,10 +127,11 @@ class Report:
 
         if self.state == State.SELECT_ABUSE:
             if message.content == self.INFO_KEYWORD:
+                # TODO: Add abuse type information
                 return ["Information about Abuse types..."]
             if message.content in [str(i+1) for i in range(len(self.ABUSE_TYPES))]:
                 self.abuse_type = self.ABUSE_TYPES[int(message.content) - 1]
-                self.state = State.REPORT_COMPLETE
+                self.state = State.REPORT_SENT
                 reply = "Thank you for reporting.\n"
                 reply += f"The following content has been flagged for review as `{self.abuse_type}` material:\n"
                 reply += f"```{self.message.author.name}: {self.message.content}```\n"
@@ -140,6 +143,25 @@ class Report:
                 return [reply]
 
         return []
+
+    def gather_report_information(self):
+        return (
+            {
+                "author": self.author,
+                "message": self.message,
+                "report_imminent_danger": self.report_imminent_danger,
+                "abuse_type": self.abuse_type,
+            }
+        )
+
+    def terminate_report(self):
+        self.state = State.REPORT_COMPLETE
+        reply = "Your case has been closed. If there is anything else you would"
+        reply += " like to report, please type `help` to open a new case."
+        return [reply]
+
+    def report_sent(self):
+        return self.state == State.REPORT_SENT
 
     def report_complete(self):
         return self.state == State.REPORT_COMPLETE

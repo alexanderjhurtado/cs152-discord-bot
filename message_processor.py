@@ -8,7 +8,7 @@ INDIVIDUAL_SCORE_THRESHOLD = 0.625
 TF_IDF_SURFACING_THRESHOLD = 0.08
 HARASSMENT_SCORE_THRESHOLD = 0.5 # TODO: MODIFY TO ACTUAL VALUE
 
-class TargetedEntityDetector:
+class MessageProcessor:
     def __init__(self):
         with open('tokens.json') as f:
             self.perspective_key = json.load(f)['perspective']

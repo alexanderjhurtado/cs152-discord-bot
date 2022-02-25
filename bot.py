@@ -8,6 +8,8 @@ import logging
 import re
 import requests
 from report import Report
+from manual_review import ManualReview
+from message_processor import MessageProcessor
 from uni2ascii import uni2ascii
 
 INDIVIDUAL_SCORE_THRESHOLD = 0.625
@@ -37,9 +39,9 @@ class ModBot(discord.Client):
         self.group_num = None
         self.mod_channels = {} # Map from guild to the mod channel id for that guild
         self.reports = {} # Map from user IDs to the state of their report
+        self.manual_reviews = {} # Map from user IDs to a manual review corresponding to their
         self.perspective_key = key
-        self.entity_scores = {}
-        self.entity_mentions = {}
+        self.message_processor = MessageProcessor()
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It\'s in these guilds:')
@@ -79,7 +81,7 @@ class ModBot(discord.Client):
         # Handle a help message
         if message.content == Report.HELP_KEYWORD:
             reply =  "Use the `report` command to begin the reporting process.\n"
-            reply += "Use the `cancel` command to cancel the report process.\n"
+            reply += "Use the `cancel` command to cancel the report and manual review process.\n"
             await message.channel.send(reply)
             return
         author_id = message.author.id
@@ -89,14 +91,22 @@ class ModBot(discord.Client):
             return
         # If we don't currently have an active report for this user, add one
         if author_id not in self.reports:
-            self.reports[author_id] = Report(self)
-        # Let the report class handle this message; forward all the messages it returns to uss
-        responses = await self.reports[author_id].handle_message(message)
+            self.reports[author_id] = Report(self, message.author)
+        # Let the report class handle this message; forward all the messages it returns to us
+        current_report = self.reports[author_id]
+        responses = await current_report.handle_message(message)
         for r in responses:
             await message.channel.send(r)
-        # If the report is complete or cancelled, remove it from our map
-        if self.reports[author_id].report_complete():
+        # If the report is ready for review, create a new manual report
+        if current_report.report_sent():
+            report_info = current_report.gather_report_information()
+            self.manual_reviews[author_id] = ManualReview(self, report_info)
+            await self.manual_reviews[author_id].initial_message()
+        # If the report is complete or cancelled, remove it from report and manual review maps
+        if current_report.report_complete():
             self.reports.pop(author_id)
+            if author_id in self.manual_reviews:
+                self.manual_reviews.pop(author_id)
 
     async def handle_channel_message(self, message):
         # Only handle messages sent in the "group-#" channel
@@ -105,34 +115,12 @@ class ModBot(discord.Client):
         mod_channel = self.mod_channels[message.guild.id]
         # ASCII-fy then extract Perspective score and entity mentions from message
         message_content = uni2ascii(message.content)
-        scores = self.eval_text(message_content)
+        scores = self.message_processor.eval_text(message_content)
         # Additional work for messages that are harassment-like
         if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in scores.values()):
             # Forward warning to mod channel about harassing messages
             await mod_channel.send(embed=AbuseWarningEmbed(message), view=AbuseWarningView(message))
             # TODO: Identify any entities that are being targeted and forward warning to mod channel
-
-    def eval_text(self, message):
-        '''
-        Given a message string, forwards the message to Perspective and returns a dictionary of scores.
-        '''
-        PERSPECTIVE_URL = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze'
-        url = PERSPECTIVE_URL + '?key=' + self.perspective_key
-        data_dict = {
-            'comment': {'text': message},
-            'languages': ['en'],
-            'requestedAttributes': {
-                                    'SEVERE_TOXICITY': {}, 'IDENTITY_ATTACK': {},
-                                    'THREAT': {}, 'TOXICITY': {}, 'SEXUALLY_EXPLICIT': {},
-                                },
-            'doNotStore': True
-        }
-        response = requests.post(url, data=json.dumps(data_dict))
-        response_dict = response.json()
-        scores = {}
-        for attr in response_dict["attributeScores"]:
-            scores[attr] = response_dict["attributeScores"][attr]["summaryScore"]["value"]
-        return scores
 
 
 class AbuseWarningView(View):
@@ -175,7 +163,6 @@ class AbuseWarningEmbed(discord.Embed):
 
 #     def code_format(self, text):
 #         return "```" + text + "```"
-
 
 
 client = ModBot(perspective_key)
