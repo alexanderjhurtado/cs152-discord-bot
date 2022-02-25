@@ -92,10 +92,12 @@ class Report:
                 self.state = State.MESSAGE_IDENTIFIED
                 return ["Thanks for confirming.", \
                         "Are you in imminent danger from this message? Reply `yes` or `no`."]
-            if message.content == self.NO_KEYWORD:
+            elif message.content == self.NO_KEYWORD:
                 self.state = State.AWAITING_MESSAGE
                 self.message = None
                 return ["Sorry we weren't able to find that material. Please submit another link to the content you wish to report."]
+            else:
+                return ["Sorry, please reply with `yes` or `no`."]
 
 
         if self.state == State.MESSAGE_IDENTIFIED:
@@ -105,9 +107,11 @@ class Report:
                 reply = "Please immediately alert the local authorities by dialing 911.\n\n"
                 reply += "Would you like us to forward the relevant message information to the authorities? Reply `yes` or `no`."
                 return [reply]
-            if message.content == self.NO_KEYWORD:
+            elif message.content == self.NO_KEYWORD:
                 self.state = State.SELECT_ABUSE
                 return [self.select_abuse_message()]
+            else:
+                return ["Sorry, please reply with `yes` or `no`."]
 
         if self.state == State.IMMINENT_DANGER:
             # Allows the user to send relevant message info to the local authorities
@@ -124,6 +128,8 @@ class Report:
 
                 select_abuse_reply = self.select_abuse_message()
                 return [imminent_danger_reply, select_abuse_reply]
+            else:
+                return ["Sorry, please reply with `yes` or `no`."]
 
         if self.state == State.SELECT_ABUSE:
             if message.content == self.INFO_KEYWORD:
@@ -140,6 +146,10 @@ class Report:
                 reply += "local authorities.\n\n"
                 reply += "In the meantime, consider blocking the user to prevent "
                 reply += "further exposure to their content."
+                return [reply]
+            else:
+                reply = f'Sorry, please reply with a number between 1 and {len(self.ABUSE_TYPES)}'
+                reply += self.select_abuse_message()
                 return [reply]
 
         return []

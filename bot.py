@@ -125,6 +125,9 @@ class ModBot(discord.Client):
 
     async def terminate_report(self, author_id, message, channel):
         await channel.send(message)
+        await self.remove_report(author_id)
+
+    async def remove_report(self, author_id):
         if author_id in self.reports:
             self.reports.pop(author_id)
         if author_id in self.manual_reviews:

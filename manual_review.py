@@ -16,7 +16,7 @@ class ManualReview:
         "Other": "General category that includes all malicious content that is may be considered in violation of our guidelines",
     }
 
-    NOT_ABUSE_MESSAGE = "Unfortunately, we were unable to find the reported content in violation of our community guidelines."
+    NOT_ABUSE_MESSAGE = "Unfortunately, we did not find the reported content to be in violation of our community guidelines."
 
     def __init__(self, client, report_info, reporting_channel):
         self.report_imminent_danger = report_info["report_imminent_danger"]
@@ -90,7 +90,7 @@ class ManualReview:
                 },
             ]
         }
-        view = ReturnUserView(self.send_dm, self.NOT_ABUSE_MESSAGE)
+        view = ReturnUserView(self.send_dm, self.remove_report_no_message, self.NOT_ABUSE_MESSAGE)
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
 
     async def take_action_on_message(self):
@@ -100,6 +100,9 @@ class ManualReview:
         }
         view = TakeActionView(self.message, self.mod_channel, self.send_dm)
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
+
+    async def remove_report_no_message(self):
+        await self.client.remove_report(self.author.id)
 
     async def send_dm(self, message):
         await self.client.terminate_report(self.author.id, message, self.reporting_channel)
@@ -149,7 +152,8 @@ class InitialMessageViewDanger(View):
         button.disabled = True
         message = "The authorities have been sent the following information:\n\n"
         message += f"Reported by: {self.author}\n"
-        message += f'<@{self.message.author.id}> said:\n"{self.truncate_string(self.message.content)}" [[link]({self.message.jump_url})]\n'
+        message += f'<@{self.message.author.id}> said:\n"{self.truncate_string(self.message.content)}"\n'
+        message += f'Link to message: {self.message.jump_url}'
         await self.mod_channel.send(message)
         await interaction.response.edit_message(view=self)
 
@@ -176,17 +180,19 @@ class EvaluateAbuseView(View):
 
 
 class ReturnUserView(View):
-    def __init__(self, send_dm, message):
+    def __init__(self, send_dm, remove_report_no_message, message):
         super().__init__()
         self.send_dm = send_dm
+        self.remove_report_no_message = remove_report_no_message
         self.message = message
 
-    @discord.ui.button(label='Cancel', style=discord.ButtonStyle.red)
+    @discord.ui.button(label="Don't send", style=discord.ButtonStyle.red)
     async def cancel_callback(self, button, interaction):
-        button.label = "Canceled"
+        button.label = "Not sent"
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
+        await self.remove_report_no_message()
 
     @discord.ui.button(label='Send', style=discord.ButtonStyle.green)
     async def send_callback(self, button, interaction):
