@@ -154,12 +154,6 @@ class Report:
             }
         )
 
-    def terminate_report(self):
-        self.state = State.REPORT_COMPLETE
-        reply = "Your case has been closed. If there is anything else you would"
-        reply += " like to report, please type `help` to open a new case."
-        return [reply]
-
     def report_sent(self):
         return self.state == State.REPORT_SENT
 

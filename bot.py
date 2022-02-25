@@ -100,8 +100,9 @@ class ModBot(discord.Client):
         # If the report is ready for review, create a new manual report
         if current_report.report_sent():
             report_info = current_report.gather_report_information()
-            self.manual_reviews[author_id] = ManualReview(self, report_info)
-            await self.manual_reviews[author_id].initial_message()
+            if author_id not in self.manual_reviews:
+                self.manual_reviews[author_id] = ManualReview(self, report_info, message.channel)
+                await self.manual_reviews[author_id].initial_message()
         # If the report is complete or cancelled, remove it from report and manual review maps
         if current_report.report_complete():
             self.reports.pop(author_id)
@@ -121,6 +122,14 @@ class ModBot(discord.Client):
             # Forward warning to mod channel about harassing messages
             await mod_channel.send(embed=AbuseWarningEmbed(message), view=AbuseWarningView(message))
             # TODO: Identify any entities that are being targeted and forward warning to mod channel
+
+    async def terminate_report(self, author_id, message, channel):
+        await channel.send(message)
+        if author_id in self.reports:
+            self.reports.pop(author_id)
+        if author_id in self.manual_reviews:
+            self.manual_reviews.pop(author_id)
+
 
 
 class AbuseWarningView(View):
