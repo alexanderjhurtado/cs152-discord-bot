@@ -97,17 +97,12 @@ class ModBot(discord.Client):
         responses = await current_report.handle_message(message)
         for r in responses:
             await message.channel.send(r)
-        # If the report is ready for review, create a new manual report
-        if current_report.report_sent():
+        if current_report.report_complete():
             report_info = current_report.gather_report_information()
             if author_id not in self.manual_reviews:
                 self.manual_reviews[author_id] = ManualReview(self, report_info, message.channel)
                 await self.manual_reviews[author_id].initial_message()
-        # If the report is complete or cancelled, remove it from report and manual review maps
-        if current_report.report_complete():
             self.reports.pop(author_id)
-            if author_id in self.manual_reviews:
-                self.manual_reviews.pop(author_id)
 
     async def handle_channel_message(self, message):
         # Only handle messages sent in the "group-#" channel

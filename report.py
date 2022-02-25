@@ -9,7 +9,6 @@ class State(Enum):
     MESSAGE_IDENTIFIED = auto()
     IMMINENT_DANGER = auto()
     SELECT_ABUSE = auto()
-    REPORT_SENT = auto()
     REPORT_COMPLETE = auto()
 
 class Report:
@@ -19,6 +18,15 @@ class Report:
     INFO_KEYWORD = "info"
     YES_KEYWORD = "yes"
     NO_KEYWORD = "no"
+
+    ABUSE_DEFINITIONS = {
+        "Bullying": "Intent to harm, intimidate, or coerce (someone perceived as vulnerable).",
+        "Hate Speech": "Abusive or threatening speech or writing that expresses prejudice against a particular group, especially on the basis of race, religion, or sexual orientation.",
+        "Sexual Harrassment": "Content that depicts sexually explicit activities",
+        "Revealing Personal Information": "Content that exposes a user's personal, sensitive information without consent",
+        "Advocating Violence": "Depiction of especially vivid, brutal and realistic acts of violence",
+        "Other": "General category that includes all malicious content that is may be considered in violation of our guidelines",
+    }
 
     ABUSE_TYPES = [
         "Bullying",
@@ -133,11 +141,15 @@ class Report:
 
         if self.state == State.SELECT_ABUSE:
             if message.content == self.INFO_KEYWORD:
+                reply = ""
+                for abuse in self.ABUSE_DEFINITIONS:
+                    reply += f"{abuse}: {self.ABUSE_DEFINITIONS[abuse]}\n\n"
+                return [reply]
                 # TODO: Add abuse type information
-                return ["Information about Abuse types..."]
+
             if message.content in [str(i+1) for i in range(len(self.ABUSE_TYPES))]:
                 self.abuse_type = self.ABUSE_TYPES[int(message.content) - 1]
-                self.state = State.REPORT_SENT
+                self.state = State.REPORT_COMPLETE
                 reply = "Thank you for reporting.\n"
                 reply += f"The following content has been flagged for review as `{self.abuse_type}` material:\n"
                 reply += f"```{self.message.author.name}: {self.message.content}```\n"
@@ -163,9 +175,6 @@ class Report:
                 "abuse_type": self.abuse_type,
             }
         )
-
-    def report_sent(self):
-        return self.state == State.REPORT_SENT
 
     def report_complete(self):
         return self.state == State.REPORT_COMPLETE
