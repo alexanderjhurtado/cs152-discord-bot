@@ -16,7 +16,7 @@ class ManualReview:
         "Other": "General category that includes all malicious content that is may be considered in violation of our guidelines",
     }
 
-    NOT_ABUSE_MESSAGE = "Unfortunately, we were unable to find the reported content in violation of our community guidelines."
+    NOT_ABUSE_MESSAGE = "Sorry, we did not find the reported content to be in violation of our community guidelines: "
 
     def __init__(self, client, report_info, reporting_channel):
         self.report_imminent_danger = report_info["report_imminent_danger"]
@@ -44,14 +44,14 @@ class ManualReview:
                 },
                 {
                     "name": "Message",
-                    "value": f'<@{self.message.author.id}> said:\n"{self.truncate_string(self.message.content)}" [[link]({self.message.jump_url})]',
+                    "value": f'<@{self.message.author.id}> said:\n"{truncate_string(self.message.content)}" [[link]({self.message.jump_url})]',
                     "inline": False,
                 },
             ]
         }
         view = InitialMessageView(self.message, self.author, self.begin_review)
         if self.report_imminent_danger:
-            view = InitialMessageViewDanger(self.message, self.mod_channel, self.author, self.begin_review, self.truncate_string)
+            view = InitialMessageViewDanger(self.message, self.mod_channel, self.author, self.begin_review)
             embed["description"] = "User is in imminent danger and wants the following info reported to the authorities."
             embed["color"] = 0xED1500
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
@@ -70,7 +70,7 @@ class ManualReview:
                 },
                 {
                     "name": "Message",
-                    "value": f'<@{self.message.author.id}> said:\n"{self.truncate_string(self.message.content)}" [[link]({self.message.jump_url})]',
+                    "value": f'<@{self.message.author.id}> said:\n"{truncate_string(self.message.content)}" [[link]({self.message.jump_url})]',
                     "inline": False,
                 },
             ]
@@ -79,18 +79,19 @@ class ManualReview:
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
 
     async def return_to_user(self):
+        message_to_user = self.NOT_ABUSE_MESSAGE + f"[`{self.message.author} said: \"{truncate_string(self.message.content)}\"`]"
         embed = {
             "title": "Return To User",
             "description": "The content was not found to be abusive. Send the following message to the user?",
             "fields": [
                 {
                     "name": "Reply to User",
-                    "value": self.NOT_ABUSE_MESSAGE,
+                    "value": message_to_user,
                     "inline": False,
                 },
             ]
         }
-        view = ReturnUserView(self.send_dm, self.NOT_ABUSE_MESSAGE)
+        view = ReturnUserView(self.send_dm, message_to_user)
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
 
     async def take_action_on_message(self):
@@ -104,12 +105,12 @@ class ManualReview:
     async def send_dm(self, message):
         await self.client.terminate_report(self.author.id, message, self.reporting_channel)
 
-    def truncate_string(self, string):
-        '''
-        Truncate string to a certain length and add ellipsis if appropriate
-        '''
-        TRUNCATION_LENGTH = 325
-        return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
+def truncate_string(string):
+    '''
+    Truncate string to a certain length and add ellipsis if appropriate
+    '''
+    TRUNCATION_LENGTH = 325
+    return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
 
 
 class InitialMessageView(View):
@@ -128,13 +129,12 @@ class InitialMessageView(View):
 
 
 class InitialMessageViewDanger(View):
-    def __init__(self, message, mod_channel, author, begin_review, truncate_string):
+    def __init__(self, message, mod_channel, author, begin_review):
         super().__init__()
         self.message = message
         self.mod_channel = mod_channel
         self.author = author
         self.begin_review = begin_review
-        self.truncate_string = truncate_string
 
     @discord.ui.button(label='Begin Review', style=discord.ButtonStyle.green)
     async def begin_review_callback(self, button, interaction):
@@ -149,7 +149,8 @@ class InitialMessageViewDanger(View):
         button.disabled = True
         message = "The authorities have been sent the following information:\n\n"
         message += f"Reported by: {self.author}\n"
-        message += f'<@{self.message.author.id}> said:\n"{self.truncate_string(self.message.content)}" [[link]({self.message.jump_url})]\n'
+        message += f'<@{self.message.author.id}> said:\n"{truncate_string(self.message.content)}"\n'
+        message += f'Link to message: {self.message.jump_url}'
         await self.mod_channel.send(message)
         await interaction.response.edit_message(view=self)
 
@@ -181,9 +182,9 @@ class ReturnUserView(View):
         self.send_dm = send_dm
         self.message = message
 
-    @discord.ui.button(label='Cancel', style=discord.ButtonStyle.red)
+    @discord.ui.button(label="Don't send", style=discord.ButtonStyle.red)
     async def cancel_callback(self, button, interaction):
-        button.label = "Canceled"
+        button.label = "Not sent"
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
@@ -210,12 +211,12 @@ class TakeActionView(View):
         button.disabled = True
         await self.message.delete()
         await interaction.response.edit_message(view=self)
-        await self.send_dm("Your reported content was deleted.")
+        await self.send_dm(f"The message you reported was deleted [`{self.message.author} said: \"{truncate_string(self.message.content)}\"`].")
 
     @discord.ui.button(label='Kick user', style=discord.ButtonStyle.red)
     async def kick_user_callback(self, button, interaction):
         button.label = 'User kicked'
         button.disabled = True
-        await self.mod_channel.send(f'{self.message.author.name} has been kicked.') # simulate user being kicked
+        await self.message.channel.send(f'{self.message.author.name} has been kicked.') # simulate user being kicked
         await interaction.response.edit_message(view=self)
-        await self.send_dm("The reported user was kicked.")
+        await self.send_dm(f"The user you reported [`{self.message.author}`] was kicked.")

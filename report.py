@@ -145,8 +145,6 @@ class Report:
                 for abuse in self.ABUSE_DEFINITIONS:
                     reply += f"{abuse}: {self.ABUSE_DEFINITIONS[abuse]}\n\n"
                 return [reply]
-                # TODO: Add abuse type information
-
             if message.content in [str(i+1) for i in range(len(self.ABUSE_TYPES))]:
                 self.abuse_type = self.ABUSE_TYPES[int(message.content) - 1]
                 self.state = State.REPORT_COMPLETE
