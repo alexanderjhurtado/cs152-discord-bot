@@ -102,7 +102,8 @@ class ModBot(discord.Client):
             if author_id not in self.manual_reviews:
                 self.manual_reviews[author_id] = ManualReview(self, report_info, message.channel)
                 await self.manual_reviews[author_id].initial_message()
-            self.reports.pop(author_id)
+            if author_id in self.reports:
+                self.reports.pop(author_id)
 
     async def handle_channel_message(self, message):
         # Only handle messages sent in the "group-#" channel
