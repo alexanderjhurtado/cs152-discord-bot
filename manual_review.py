@@ -18,7 +18,8 @@ class ManualReview:
 
     NOT_ABUSE_MESSAGE = "Sorry, we did not find the reported content to be in violation of our community guidelines: "
 
-    def __init__(self, client, report_info, reporting_channel):
+    def __init__(self, case_id, client, report_info, reporting_channel):
+        self.case_id = case_id
         self.report_imminent_danger = report_info["report_imminent_danger"]
         self.author = report_info["author"]
         self.message = report_info["message"]
@@ -91,7 +92,7 @@ class ManualReview:
                 },
             ]
         }
-        view = ReturnUserView(self.send_dm, message_to_user)
+        view = ReturnUserView(self.end_case, message_to_user)
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
 
     async def take_action_on_message(self):
@@ -99,11 +100,16 @@ class ManualReview:
             "title": "Take Action",
             "description": "How would you like to take action?",
         }
-        view = TakeActionView(self.message, self.mod_channel, self.send_dm)
+        view = TakeActionView(self.message, self.mod_channel, self.end_case)
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
 
-    async def send_dm(self, message):
-        await self.client.terminate_report(self.author.id, message, self.reporting_channel)
+    async def end_case(self, message=None):
+        await self.client.terminate_case(
+            author_id=self.author.id,
+            manual_review_case_id=self.case_id,
+            message=message,
+            channel=self.reporting_channel
+        )
 
 def truncate_string(string):
     '''
@@ -177,9 +183,9 @@ class EvaluateAbuseView(View):
 
 
 class ReturnUserView(View):
-    def __init__(self, send_dm, message):
+    def __init__(self, end_case, message):
         super().__init__()
-        self.send_dm = send_dm
+        self.end_case = end_case
         self.message = message
 
     @discord.ui.button(label="Don't send", style=discord.ButtonStyle.red)
@@ -188,6 +194,7 @@ class ReturnUserView(View):
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
+        await self.end_case()
 
     @discord.ui.button(label='Send', style=discord.ButtonStyle.green)
     async def send_callback(self, button, interaction):
@@ -195,23 +202,28 @@ class ReturnUserView(View):
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
-        await self.send_dm(self.message)
+        await self.end_case(self.message)
 
 
 class TakeActionView(View):
-    def __init__(self, message, mod_channel, send_dm):
+    def __init__(self, message, mod_channel, end_case):
         super().__init__()
         self.message = message
         self.mod_channel = mod_channel
-        self.send_dm = send_dm
+        self.end_case = end_case
 
     @discord.ui.button(label='Delete message', style=discord.ButtonStyle.gray)
     async def delete_message_callback(self, button, interaction):
         button.label = 'Message deleted'
         button.disabled = True
-        await self.message.delete()
         await interaction.response.edit_message(view=self)
-        await self.send_dm(f"The message you reported was deleted [`{self.message.author} said: \"{truncate_string(self.message.content)}\"`].")
+        try:
+            await self.message.delete()
+            await self.end_case(f"The message you reported was deleted [`{self.message.author} said: \"{truncate_string(self.message.content)}\"`].")
+        except:
+            await self.mod_channel.send("Looks like that message was already deleted.")
+            await self.end_case()
+
 
     @discord.ui.button(label='Kick user', style=discord.ButtonStyle.red)
     async def kick_user_callback(self, button, interaction):
@@ -219,4 +231,4 @@ class TakeActionView(View):
         button.disabled = True
         await self.message.channel.send(f'{self.message.author.name} has been kicked.') # simulate user being kicked
         await interaction.response.edit_message(view=self)
-        await self.send_dm(f"The user you reported [`{self.message.author}`] was kicked.")
+        await self.end_case(f"The user you reported [`{self.message.author}`] was kicked.")

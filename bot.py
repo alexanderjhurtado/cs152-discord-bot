@@ -11,6 +11,8 @@ from report import Report
 from manual_review import ManualReview
 from message_processor import MessageProcessor
 from uni2ascii import uni2ascii
+from datetime import datetime
+from uuid import uuid4
 
 INDIVIDUAL_SCORE_THRESHOLD = 0.625
 
@@ -38,8 +40,8 @@ class ModBot(discord.Client):
         super().__init__(command_prefix='.', intents=intents)
         self.group_num = None
         self.mod_channels = {} # Map from guild to the mod channel id for that guild
-        self.reports = {} # Map from user IDs to the state of their report
-        self.manual_reviews = {} # Map from user IDs to a manual review corresponding to their
+        self.reports = {} # Map from case ID to the state of their report
+        self.manual_reviews = {} # Map from case ID to a manual review corresponding to their
         self.perspective_key = key
         self.message_processor = MessageProcessor()
 
@@ -99,11 +101,16 @@ class ModBot(discord.Client):
             await message.channel.send(r)
         if current_report.report_complete():
             report_info = current_report.gather_report_information()
-            if author_id not in self.manual_reviews:
-                self.manual_reviews[author_id] = ManualReview(self, report_info, message.channel)
-                await self.manual_reviews[author_id].initial_message()
+            manual_review_case_id = str(author_id) + datetime.now().strftime('%Y%m%d%H%M%S%f') + str(uuid4())
             if author_id in self.reports:
                 self.reports.pop(author_id)
+            self.manual_reviews[manual_review_case_id] = ManualReview(
+                case_id=manual_review_case_id,
+                client=self,
+                report_info=report_info,
+                reporting_channel=message.channel,
+            )
+            await self.manual_reviews[manual_review_case_id].initial_message()
 
     async def handle_channel_message(self, message):
         # Only handle messages sent in the "group-#" channel
@@ -119,15 +126,13 @@ class ModBot(discord.Client):
             await mod_channel.send(embed=AbuseWarningEmbed(message), view=AbuseWarningView(message))
             # TODO: Identify any entities that are being targeted and forward warning to mod channel
 
-    async def terminate_report(self, author_id, message, channel):
-        await channel.send(message)
-        await self.remove_report(author_id)
-
-    async def remove_report(self, author_id):
+    async def terminate_case(self, author_id, manual_review_case_id, message, channel):
+        if message:
+            await channel.send(message)
         if author_id in self.reports:
             self.reports.pop(author_id)
-        if author_id in self.manual_reviews:
-            self.manual_reviews.pop(author_id)
+        if manual_review_case_id in self.manual_reviews:
+            self.manual_reviews.pop(manual_review_case_id)
 
 
 
