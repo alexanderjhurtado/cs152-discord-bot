@@ -120,6 +120,13 @@ class ModBot(discord.Client):
         # ASCII-fy then extract Perspective score and entity mentions from message
         message_content = uni2ascii(message.content)
         scores = self.message_processor.eval_text(message_content)
+
+        # TODO: log count of all user's messages
+        # log user's potentially abusive messages
+        # if user reaches an abusive threshold (proportion of messages or count messages):
+        # send an auto detected message of message history
+        # increment user's threshold (each user mapping carries its own threshold property that can be increased)
+
         # Additional work for messages that are harassment-like
         if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in scores.values()):
             # Forward warning to mod channel about harassing messages
@@ -141,6 +148,19 @@ class AbuseWarningView(View):
         super().__init__()
         self.message = message
 
+    @discord.ui.button(label='Send warning', style=discord.ButtonStyle.blurple)
+    async def send_warning_callback(self, button, interaction):
+        button.label = 'Warning sent'
+        button.disabled = True
+        warning_message = (
+            f"This is a warning from the moderators of `{self.message.channel.name}`.\n"
+            f"We've flagged your message as abusive content.\n"
+            "Please refrain from using abusive language in the channel."
+        )
+        await self.message.author.send(embed=AbuseWarningEmbed(self.message))
+        await self.message.author.send(content=warning_message)
+        await interaction.response.edit_message(view=self)
+
     @discord.ui.button(label='Delete message', style=discord.ButtonStyle.gray)
     async def delete_message_callback(self, button, interaction):
         button.label = 'Message deleted'
@@ -158,15 +178,15 @@ class AbuseWarningView(View):
 class AbuseWarningEmbed(discord.Embed):
     def __init__(self, message):
         title = 'Potentially abusive message detected'
-        description = f'<@{message.author.id}> said:\n"{self.truncate_string(message.content)}" [[link]({message.jump_url})]'
+        description = f'<@{message.author.id}> said:\n"{truncate_string(message.content)}" [[link]({message.jump_url})]'
         super().__init__(title=title, description=description, color=0xED1500)
 
-    def truncate_string(self, string):
-        '''
-        Truncate string to a certain length and add ellipsis if appropriate
-        '''
-        TRUNCATION_LENGTH = 325
-        return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
+def truncate_string(string):
+    '''
+    Truncate string to a certain length and add ellipsis if appropriate
+    '''
+    TRUNCATION_LENGTH = 325
+    return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
 
 # class CampaignWarningEmbed(discord.Embed):
 #     def __init__(self, targeted_entities):
