@@ -10,11 +10,8 @@ import requests
 from report import Report
 from manual_review import ManualReview
 from message_processor import MessageProcessor
-from uni2ascii import uni2ascii
 from datetime import datetime
 from uuid import uuid4
-
-INDIVIDUAL_SCORE_THRESHOLD = 0.625
 
 # Set up logging to the console
 logger = logging.getLogger('discord')
@@ -117,21 +114,12 @@ class ModBot(discord.Client):
         if not message.channel.name == f'group-{self.group_num}':
             return
         mod_channel = self.mod_channels[message.guild.id]
-        # ASCII-fy then extract Perspective score and entity mentions from message
-        message_content = uni2ascii(message.content)
-        scores = self.message_processor.eval_text(message_content)
 
-        # TODO: log count of all user's messages
-        # log user's potentially abusive messages
-        # if user reaches an abusive threshold (proportion of messages or count messages):
-        # send an auto detected message of message history
-        # increment user's threshold (each user mapping carries its own threshold property that can be increased)
-
-        # Additional work for messages that are harassment-like
-        if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in scores.values()):
-            # Forward warning to mod channel about harassing messages
-            await mod_channel.send(embed=AbuseWarningEmbed(message), view=AbuseWarningView(message))
-            # TODO: Identify any entities that are being targeted and forward warning to mod channel
+        self.message_processor.process_message(message)
+        abusive_users = self.message_processor.user_abuse_threshold_exceeded()
+        if len(abusive_users) > 0:
+            for user, messages in abusive_users:
+                await mod_channel.send(embed=AbuseWarningEmbed(messages), view=AbuseWarningView(messages))
 
     async def terminate_case(self, author_id, manual_review_case_id, message, channel):
         if message:
@@ -142,51 +130,65 @@ class ModBot(discord.Client):
             self.manual_reviews.pop(manual_review_case_id)
 
 
-
-class AbuseWarningView(View):
-    def __init__(self, message):
-        super().__init__()
-        self.message = message
-
-    @discord.ui.button(label='Send warning', style=discord.ButtonStyle.blurple)
-    async def send_warning_callback(self, button, interaction):
-        button.label = 'Warning sent'
-        button.disabled = True
-        warning_message = (
-            f"This is a warning from the moderators of `{self.message.channel.name}`.\n"
-            f"We've flagged your message as abusive content.\n"
-            "Please refrain from using abusive language in the channel."
-        )
-        await self.message.author.send(embed=AbuseWarningEmbed(self.message))
-        await self.message.author.send(content=warning_message)
-        await interaction.response.edit_message(view=self)
-
-    @discord.ui.button(label='Delete message', style=discord.ButtonStyle.gray)
-    async def delete_message_callback(self, button, interaction):
-        button.label = 'Message deleted'
-        button.disabled = True
-        await self.message.delete()
-        await interaction.response.edit_message(view=self)
-
-    @discord.ui.button(label='Kick user', style=discord.ButtonStyle.red)
-    async def kick_user_callback(self, button, interaction):
-        button.label = 'User kicked'
-        button.disabled = True
-        await self.message.channel.send(f'{self.message.author.name} has been kicked.') # simulate user being kicked
-        await interaction.response.edit_message(view=self)
-
-class AbuseWarningEmbed(discord.Embed):
-    def __init__(self, message):
-        title = 'Potentially abusive message detected'
-        description = f'<@{message.author.id}> said:\n"{truncate_string(message.content)}" [[link]({message.jump_url})]'
-        super().__init__(title=title, description=description, color=0xED1500)
-
-def truncate_string(string):
+def truncate_string(string, truncation_length=325):
     '''
     Truncate string to a certain length and add ellipsis if appropriate
     '''
-    TRUNCATION_LENGTH = 325
-    return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
+    return string[:truncation_length] + ("..." if len(string) > truncation_length else "")
+
+
+class AbuseWarningView(View):
+    def __init__(self, messages):
+        super().__init__()
+        self.messages = messages
+        self.user = messages[0].author
+        self.channel = messages[0].channel
+
+    @discord.ui.button(label='Send warning', style=discord.ButtonStyle.blurple)
+    async def send_warning_callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'Warning sent'
+        button.disabled = True
+        warning_message = (
+            f"This is a warning from the moderators of `{self.channel.name}`.\n"
+            f"We've flagged your messages as abusive content.\n"
+            "Please refrain from using abusive language in the channel."
+        )
+        await self.user.send(embed=AbuseWarningEmbed(self.messages))
+        await self.user.send(content=warning_message)
+        await interaction.edit_original_message(view=self)
+
+    @discord.ui.button(label='Delete all messages', style=discord.ButtonStyle.gray)
+    async def delete_message_callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'Messages deleted'
+        button.disabled = True
+        for message in self.messages:
+            try:
+                await message.delete()
+            except discord.errors.NotFound as err:
+                pass
+        await interaction.edit_original_message(view=self)
+
+    @discord.ui.button(label='Kick user', style=discord.ButtonStyle.red)
+    async def kick_user_callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'User kicked'
+        button.disabled = True
+        await self.channel.send(f'{self.user.name} has been kicked.') # simulate user being kicked
+        await interaction.edit_original_message(view=self)
+
+class AbuseWarningEmbed(discord.Embed):
+    def __init__(self, messages):
+        title = 'Abusive messages detected'
+        description = f'<@{messages[0].author.id}> said:'
+        time = None
+        for message in messages:
+            if time != message.created_at.strftime("%b %-m, %Y"):
+                time = message.created_at.strftime("%b %-m, %Y")
+                description += f'\n{time}\n'
+            description += f'"{truncate_string(message.content)}" [[link]({message.jump_url})]\n\n'
+        super().__init__(title=title, description=description, color=0xED1500)
 
 # class CampaignWarningEmbed(discord.Embed):
 #     def __init__(self, targeted_entities):

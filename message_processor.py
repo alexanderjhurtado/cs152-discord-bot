@@ -2,33 +2,56 @@ import requests
 import spacy
 import json
 import math
+from uni2ascii import uni2ascii
 
-TOTAL_SCORE_THRESHOLD = 7.5
+# TOTAL_SCORE_THRESHOLD = 7.5
 INDIVIDUAL_SCORE_THRESHOLD = 0.625
-TF_IDF_SURFACING_THRESHOLD = 0.08
-HARASSMENT_SCORE_THRESHOLD = 0.5 # TODO: MODIFY TO ACTUAL VALUE
+# TF_IDF_SURFACING_THRESHOLD = 0.08
+# HARASSMENT_SCORE_THRESHOLD = 0.5 # TODO: MODIFY TO ACTUAL VALUE
+
+ABUSIVE_MESSAGE_COUNT_THRESHOLD = 5
 
 class MessageProcessor:
     def __init__(self):
         with open('tokens.json') as f:
             self.perspective_key = json.load(f)['perspective']
         self.named_entity_model = spacy.load('en_core_web_sm')
-        self.entity_scores = {}
-        self.entity_mentions = {}
-        self.num_total_messages = 0
-        self.token_document_frequency = {}
+        # self.entity_scores = {}
+        # self.entity_mentions = {}
+        # self.num_total_messages = 0
+        # self.token_document_frequency = {}
+        self.user_to_abusive_messages = {}
+
+    # def process_message(self, message):
+    #     perspective_scores = self.eval_text(message)
+    #     entity_set, tokenized_message = self.eval_entities(message)
+    #     self.update_token_document_frequency(tokenized_message)
+    #     if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in perspective_scores.values()):
+    #         targeted_entities = self.update_targeted_entities(entity_set, perspective_scores, message, tokenized_message)
+    #         for entity_obj in targeted_entities:
+    #             entity = entity_obj['name']
+    #             mentions = entity_obj['mentions']
+    #             tf_idf_scores = self.compute_tf_idf_by_token(mentions)
+    #             return [token for token, score in tf_idf_scores.items() if score > TF_IDF_SURFACING_THRESHOLD]
 
     def process_message(self, message):
-        perspective_scores = self.eval_text(message)
-        entity_set, tokenized_message = self.eval_entities(message)
-        self.update_token_document_frequency(tokenized_message)
+        message_content = uni2ascii(message.content)
+        perspective_scores = self.eval_text(message_content)
         if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in perspective_scores.values()):
-            targeted_entities = self.update_targeted_entities(entity_set, perspective_scores, message, tokenized_message)
-            for entity_obj in targeted_entities:
-                entity = entity_obj['name']
-                mentions = entity_obj['mentions']
-                tf_idf_scores = self.compute_tf_idf_by_token(mentions)
-                return [token for token, score in tf_idf_scores.items() if score > TF_IDF_SURFACING_THRESHOLD]
+            user = message.author
+            self.user_to_abusive_messages[user] = self.user_to_abusive_messages.get(user, []) + [message]
+        return self.user_to_abusive_messages
+
+    def user_abuse_threshold_exceeded(self):
+        users_exceeded_threshold = []
+        for user, messages in self.user_to_abusive_messages.items():
+            if len(messages) % ABUSIVE_MESSAGE_COUNT_THRESHOLD == 0:
+                users_exceeded_threshold.append((user, messages))
+        return users_exceeded_threshold
+
+
+
+
 
 
     def eval_reported_message(self, message):
