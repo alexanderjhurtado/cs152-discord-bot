@@ -1,6 +1,7 @@
 from enum import Enum, auto
 import discord
 import re
+from verify_user import isVerified
 
 class State(Enum):
     REPORT_START = auto()
@@ -256,16 +257,34 @@ class Report:
                 reply = "Is this user being silenced by the harrassment campaign? "
                 reply += "Does this threaten their open expression? Reply `yes` or `no`."
                 return [reply]
-            self.target_twitter_handle = message.content
-            # Check if twitter handle is valid
-            ## Mark invalid and set self.target_twitter_handle to None if not valid.
-            ## Save and check being silenced if valid
-            self.state = State.CHECK_BEING_SILENCED
-            reply = "We have identified the following Twitter account as being targeted:\n"
-            reply += f"```Twitter Handle: {self.target_twitter_handle}```\n"
-            reply += "Is this user being silenced by the harrassment campaign? "
-            reply += "Does this threaten their open expression? Reply `yes` or `no`."
-            return [reply]
+
+            if len(message.content.split(' ')) > 1:
+                return ["Please enter a single word representing the Twitter handle, or type `skip`."]
+
+            if message.mentions:
+                self.target_twitter_handle = message.mentions[0].name
+            elif message.content[0] == '@':
+                self.target_twitter_handle = message.content[1:]
+            else:
+                self.target_twitter_handle = message.content
+
+            user_found, user_verified = await isVerified(self.target_twitter_handle)
+            if user_found:
+                self.state = State.CHECK_BEING_SILENCED
+                reply = "We have identified the following "
+                if user_verified:
+                    reply += "verified "
+                reply += "Twitter account as being targeted:\n"
+                reply += f"```Twitter Handle: @{self.target_twitter_handle}```\n"
+                reply += "Is this user being silenced by the harrassment campaign? "
+                reply += "Does this threaten their open expression? Reply `yes` or `no`."
+                return [reply]
+            else:
+                reply = f"Unable to find Twitter user `{self.target_twitter_handle}`. Please try another handle or type `skip`."
+                self.target_twitter_handle = None
+                return [reply]
+
+
 
         if self.state == State.CHECK_BEING_SILENCED:
             if message.content in [self.YES_KEYWORD, self.NO_KEYWORD]:
