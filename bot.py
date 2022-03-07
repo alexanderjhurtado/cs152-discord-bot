@@ -114,12 +114,19 @@ class ModBot(discord.Client):
         if not message.channel.name == f'group-{self.group_num}':
             return
         mod_channel = self.mod_channels[message.guild.id]
-
+        # process the message content
         self.message_processor.process_message(message)
+        # identify and warn against abusive users
         abusive_users = self.message_processor.user_abuse_threshold_exceeded()
         if len(abusive_users) > 0:
             for user, messages in abusive_users:
                 await mod_channel.send(embed=AbuseWarningEmbed(messages), view=AbuseWarningView(messages))
+        # identity and warn about targeted entities
+        targeted_entities = self.message_processor.entity_abuse_threshold_exceeded()
+        if len(targeted_entities) > 0:
+            for entity, mentions in targeted_entities:
+                await mod_channel.send(embed=TargetedWarningEmbed(entity, mentions), view=TargetedWarningView(mentions))
+
 
     async def terminate_case(self, author_id, manual_review_case_id, message, channel):
         if message:
@@ -180,7 +187,7 @@ class AbuseWarningView(View):
 
 class AbuseWarningEmbed(discord.Embed):
     def __init__(self, messages):
-        title = 'Abusive messages detected'
+        title = 'Abusive user detected'
         description = f'<@{messages[0].author.id}> said:'
         time = None
         for message in messages:
@@ -188,16 +195,70 @@ class AbuseWarningEmbed(discord.Embed):
                 time = message.created_at.strftime("%b %-m, %Y")
                 description += f'\n{time}\n'
             description += f'"{truncate_string(message.content)}" [[link]({message.jump_url})]\n\n'
+        super().__init__(title=title, description=description, color=0xFFA500)
+
+
+class TargetedWarningView(View):
+    def __init__(self, mentions):
+        super().__init__()
+        self.channel = mentions[0]['original_message'].channel
+        self.mentions_by_user = {}
+        for mention_obj in mentions:
+            user = mention_obj['original_message'].author
+            message = mention_obj['original_message']
+            self.mentions_by_user[user] = self.mentions_by_user.get(user, []) + [message]
+
+    @discord.ui.button(label='Send warnings', style=discord.ButtonStyle.blurple)
+    async def send_warning_callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'Warnings sent'
+        button.disabled = True
+        warning_message = (
+            f"This is a warning from the moderators of `{self.channel.name}`.\n"
+            f"We've flagged your messages as abusive content.\n"
+            "Please refrain from using abusive language in the channel."
+        )
+        for user, messages in self.mentions_by_user.items():
+            await user.send(embed=AbuseWarningEmbed(messages))
+            await user.send(content=warning_message)
+        await interaction.edit_original_message(view=self)
+
+    @discord.ui.button(label='Delete all messages', style=discord.ButtonStyle.gray)
+    async def delete_message_callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'Messages deleted'
+        button.disabled = True
+        for _, messages in self.mentions_by_user.items():
+            for message in messages:
+                try:
+                    await message.delete()
+                except discord.errors.NotFound as err:
+                    pass
+        await interaction.edit_original_message(view=self)
+
+    @discord.ui.button(label='Kick users', style=discord.ButtonStyle.red)
+    async def kick_user_callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'Users kicked'
+        button.disabled = True
+        for user, _ in self.mentions_by_user.items():
+            await self.channel.send(f'{user.name} has been kicked.') # simulate user being kicked
+        await interaction.edit_original_message(view=self)
+
+class TargetedWarningEmbed(discord.Embed):
+    def __init__(self, entity, mentions):
+        mentions_by_user = {}
+        for mention_obj in mentions:
+            user = mention_obj['original_message'].author
+            message = mention_obj['original_message']
+            mentions_by_user[user] = mentions_by_user.get(user, []) + [message]
+        title = 'Targeted harassment detected'
+        description = f'Here are abusive messages mentioning the entity: `{entity}`.\n'
+        for user, messages in mentions_by_user.items():
+            description += f'<@{user.id}> said:\n'
+            for message in messages:
+                description += f'"{truncate_string(message.content)}" [[link]({message.jump_url})]\n\n'
         super().__init__(title=title, description=description, color=0xED1500)
-
-# class CampaignWarningEmbed(discord.Embed):
-#     def __init__(self, targeted_entities):
-#         title = '‼️ Possible harassment campaign detected ‼️'
-#         description = self.code_format(json.dumps({'targeted_entities': targeted_entities }, indent=2))
-#         super().__init__(title=title, description=description, color=0xED1500)
-
-#     def code_format(self, text):
-#         return "```" + text + "```"
 
 
 client = ModBot(perspective_key)
