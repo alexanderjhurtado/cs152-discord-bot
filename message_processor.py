@@ -4,12 +4,10 @@ import json
 import math
 from uni2ascii import uni2ascii
 
-ENTITY_SCORE_THRESHOLD = 10
 PERSPECTIVE_SCORE_THRESHOLD = 0.8
-# TF_IDF_SURFACING_THRESHOLD = 0.08
-# HARASSMENT_SCORE_THRESHOLD = 0.5 # TODO: MODIFY TO ACTUAL VALUE
-
 ABUSIVE_MESSAGE_COUNT_THRESHOLD = 5
+ENTITY_SCORE_THRESHOLD = 10
+TF_IDF_SURFACING_THRESHOLD = 0.1
 
 class MessageProcessor:
     def __init__(self):
@@ -22,26 +20,15 @@ class MessageProcessor:
         self.abused_entity_scores = {}
         self.entity_mentions = {}
 
-    # def process_message(self, message):
-    #     perspective_scores = self.eval_text(message)
-    #     entity_set, tokenized_message = self.eval_entities(message)
-    #     self.update_token_document_frequency(tokenized_message)
-    #     if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in perspective_scores.values()):
-    #         targeted_entities = self.update_targeted_entities(entity_set, perspective_scores, message, tokenized_message)
-    #         for entity_obj in targeted_entities:
-    #             entity = entity_obj['name']
-    #             mentions = entity_obj['mentions']
-    #             tf_idf_scores = self.compute_tf_idf_by_token(mentions)
-    #             return [token for token, score in tf_idf_scores.items() if score > TF_IDF_SURFACING_THRESHOLD]
-
     # public method
     def process_message(self, message):
         user = message.author
         message_content = uni2ascii(message.content)
         perspective_scores = self.eval_text(message_content)
         entity_set, tokenized_message = self.eval_entities(message_content)
-        self.update_message_and_entity_ledgers(message, perspective_scores, entity_set, tokenized_message)
+        self.update_message_ledger(tokenized_message)
         if any(score >= PERSPECTIVE_SCORE_THRESHOLD for score in perspective_scores.values()):
+            self.update_targeted_entities(entity_set, perspective_scores, message, tokenized_message)
             self.user_to_abusive_messages[user] = self.user_to_abusive_messages.get(user, []) + [message]
 
     def user_abuse_threshold_exceeded(self):
@@ -92,11 +79,7 @@ class MessageProcessor:
         for entity in entity_doc.ents:
             if entity.label_ == "PERSON" or entity.label_ == "NORP":
                 named_entities.add(entity.text)
-        return named_entities, [token.text for token in entity_doc]
-
-    def update_message_and_entity_ledgers(self, message, perspective_scores, entity_set, tokenized_message):
-        self.update_message_ledger(tokenized_message)
-        self.update_targeted_entities(entity_set, perspective_scores, message, tokenized_message)
+        return named_entities, [token.text.lower() for token in entity_doc]
 
     def update_message_ledger(self, tokenized_message):
         self.num_total_messages += 1
@@ -129,14 +112,14 @@ class MessageProcessor:
         '''
         return 1 if dictionary[key] >= threshold else 0
 
-    # def compute_tf_idf_by_token(self, target_messages):
-    #     num_total_tokens = 0
-    #     token_freq = {}
-    #     for mention_obj in target_messages:
-    #         for token in mention_obj['tokenized_message']:
-    #             token_freq[token] = token_freq.get(token, 0) + 1
-    #             num_total_tokens += 1
-    #     tf_idf_scores = {}
-    #     for token, freq in token_freq.items():
-    #         tf_idf_scores[token] = (freq / num_total_tokens) * math.log(self.num_total_messages / self.token_document_frequency[token])
-    #     return tf_idf_scores
+    def compute_tf_idf_by_token(self, target_messages, threshold=TF_IDF_SURFACING_THRESHOLD):
+        num_total_tokens = 0
+        token_freq = {}
+        for mention_obj in target_messages:
+            for token in mention_obj['tokenized_message']:
+                token_freq[token] = token_freq.get(token, 0) + 1
+                num_total_tokens += 1
+        tf_idf_scores = {}
+        for token, freq in token_freq.items():
+            tf_idf_scores[token] = (freq / num_total_tokens) * math.log(self.num_total_messages / self.token_document_frequency[token])
+        return [token for token, score in tf_idf_scores.items() if score > threshold]

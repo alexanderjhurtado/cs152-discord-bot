@@ -105,8 +105,7 @@ class ModBot(discord.Client):
                 case_id=manual_review_case_id,
                 client=self,
                 report_info=report_info,
-                reporting_channel=message.channel,
-            )
+                reporting_channel=message.channel)
             await self.manual_reviews[manual_review_case_id].initial_message()
 
     async def handle_channel_message(self, message):
@@ -120,13 +119,20 @@ class ModBot(discord.Client):
         abusive_users = self.message_processor.user_abuse_threshold_exceeded()
         if len(abusive_users) > 0:
             for user, messages in abusive_users:
-                await mod_channel.send(embed=AbuseWarningEmbed(messages), view=AbuseWarningView(messages))
+                await mod_channel.send(
+                    embed=AbuseWarningEmbed(messages), 
+                    view=AbuseWarningView(messages))
         # identity and warn about targeted entities
         targeted_entities = self.message_processor.entity_abuse_threshold_exceeded()
         if len(targeted_entities) > 0:
             for entity, mentions in targeted_entities:
-                await mod_channel.send(embed=TargetedWarningEmbed(entity, mentions), view=TargetedWarningView(mentions))
-
+                await mod_channel.send(
+                    embed=TargetedWarningEmbed(entity, mentions), 
+                    view=TargetedWarningView(
+                        mentions, 
+                        entity,
+                        self.message_processor.compute_tf_idf_by_token, 
+                        mod_channel.send))
 
     async def terminate_case(self, author_id, manual_review_case_id, message, channel):
         if message:
@@ -137,7 +143,7 @@ class ModBot(discord.Client):
             self.manual_reviews.pop(manual_review_case_id)
 
 
-def truncate_string(string, truncation_length=325):
+def truncate_string(string, truncation_length=240):
     '''
     Truncate string to a certain length and add ellipsis if appropriate
     '''
@@ -159,8 +165,7 @@ class AbuseWarningView(View):
         warning_message = (
             f"This is a warning from the moderators of `{self.channel.name}`.\n"
             f"We've flagged your messages as abusive content.\n"
-            "Please refrain from using abusive language in the channel."
-        )
+            "Please refrain from using abusive language in the channel.")
         await self.user.send(embed=AbuseWarningEmbed(self.messages))
         await self.user.send(content=warning_message)
         await interaction.edit_original_message(view=self)
@@ -199,14 +204,31 @@ class AbuseWarningEmbed(discord.Embed):
 
 
 class TargetedWarningView(View):
-    def __init__(self, mentions):
+    def __init__(self, mentions, entity, get_detected_keywords, send_to_mod_channel):
         super().__init__()
+        self.mentions = mentions
+        self.entity = entity
+        self.get_detected_keywords = get_detected_keywords
+        self.send_to_mod_channel = send_to_mod_channel
         self.channel = mentions[0]['original_message'].channel
         self.mentions_by_user = {}
         for mention_obj in mentions:
             user = mention_obj['original_message'].author
             message = mention_obj['original_message']
             self.mentions_by_user[user] = self.mentions_by_user.get(user, []) + [message]
+
+    @discord.ui.button(label='See associated keywords', style=discord.ButtonStyle.green)
+    async def see_words_callback(self, button, interaction):
+        await interaction.response.defer()
+        detected_keywords = self.get_detected_keywords(self.mentions)
+        button.label = 'No keywords detected'
+        button.disabled = True
+        if len(detected_keywords) > 0:
+            button.label = 'See message below'
+            await self.send_to_mod_channel(
+                view=DetectedKeywordsView(detected_keywords), 
+                embed=DetectedKeywordsEmbed(detected_keywords, self.entity))
+        await interaction.edit_original_message(view=self)
 
     @discord.ui.button(label='Send warnings', style=discord.ButtonStyle.blurple)
     async def send_warning_callback(self, button, interaction):
@@ -216,8 +238,7 @@ class TargetedWarningView(View):
         warning_message = (
             f"This is a warning from the moderators of `{self.channel.name}`.\n"
             f"We've flagged your messages as abusive content.\n"
-            "Please refrain from using abusive language in the channel."
-        )
+            "Please refrain from using abusive language in the channel.")
         for user, messages in self.mentions_by_user.items():
             await user.send(embed=AbuseWarningEmbed(messages))
             await user.send(content=warning_message)
@@ -259,6 +280,28 @@ class TargetedWarningEmbed(discord.Embed):
             for message in messages:
                 description += f'"{truncate_string(message.content)}" [[link]({message.jump_url})]\n\n'
         super().__init__(title=title, description=description, color=0xED1500)
+
+
+class DetectedKeywordsView(View):
+    def __init__(self, detected_keywords):
+        super().__init__()
+
+    @discord.ui.button(label='Add to blacklist', style=discord.ButtonStyle.red)
+    async def callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'Keywords blacklisted'
+        button.disabled = True
+        # TODO: implement keyword flagging
+        await interaction.edit_original_message(view=self)
+
+class DetectedKeywordsEmbed(discord.Embed):
+    def __init__(self, detected_keywords, entity):
+        title = f'Detected keywords'
+        description = f'Here are keywords associated with abuse towards `{entity}`:\n'
+        for word in detected_keywords:
+            description += f'`{word}`\n'
+        super().__init__(title=title, description=description)
+
 
 
 client = ModBot(perspective_key)
