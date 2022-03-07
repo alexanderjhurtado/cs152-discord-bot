@@ -15,10 +15,12 @@ class MessageProcessor:
             self.perspective_key = json.load(f)['perspective']
         self.named_entity_model = spacy.load('en_core_web_sm')
         self.user_to_abusive_messages = {}
+        self.user_abuse_count = {}
         self.num_total_messages = 0
         self.token_document_frequency = {}
         self.abused_entity_scores = {}
         self.entity_mentions = {}
+        self.flagged_tokens = set()
 
     # public method
     def process_message(self, message):
@@ -27,15 +29,18 @@ class MessageProcessor:
         perspective_scores = self.eval_text(message_content)
         entity_set, tokenized_message = self.eval_entities(message_content)
         self.update_message_ledger(tokenized_message)
-        if any(score >= PERSPECTIVE_SCORE_THRESHOLD for score in perspective_scores.values()):
+        if (any(score >= PERSPECTIVE_SCORE_THRESHOLD for score in perspective_scores.values()) or
+            any(token in tokenized_message for token in self.flagged_tokens)):
             self.update_targeted_entities(entity_set, perspective_scores, message, tokenized_message)
             self.user_to_abusive_messages[user] = self.user_to_abusive_messages.get(user, []) + [message]
+            self.user_abuse_count[user] = self.user_abuse_count.get(user, 0) + 1
 
     def user_abuse_threshold_exceeded(self):
         users_exceeding_threshold = []
         for user, messages in self.user_to_abusive_messages.items():
-            if len(messages) % ABUSIVE_MESSAGE_COUNT_THRESHOLD == 0:
+            if self.user_abuse_count[user] >= ABUSIVE_MESSAGE_COUNT_THRESHOLD:
                 users_exceeding_threshold.append((user, messages))
+                self.user_abuse_count[user] = 0
         return users_exceeding_threshold
 
     def entity_abuse_threshold_exceeded(self):
@@ -46,6 +51,9 @@ class MessageProcessor:
                 entities_exceeding_threshold.append((entity, mentions))
                 self.abused_entity_scores[entity] = 0
         return entities_exceeding_threshold
+
+    def update_flagged_tokens(self, tokens):
+        self.flagged_tokens.update(tokens)
 
     # private methods
     def eval_text(self, message):
@@ -93,8 +101,12 @@ class MessageProcessor:
         -- this collection represents the entities who are being targeted with harasssment. This method also logs
         each message the mentions any entity.
         '''
+        flagged_token_score = 0
+        for flagged_token in self.flagged_tokens:
+            if flagged_token in tokenized_message:
+                flagged_token_score += 1
         for entity in entity_set:
-            curr_score = self.abused_entity_scores.get(entity, 0)
+            curr_score = self.abused_entity_scores.get(entity, 0) + flagged_token_score
             curr_score += self.threshold_get(perspective_scores, 'SEVERE_TOXICITY')
             curr_score += self.threshold_get(perspective_scores, 'TOXICITY')
             curr_score += self.threshold_get(perspective_scores, 'IDENTITY_ATTACK')
