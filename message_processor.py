@@ -2,47 +2,60 @@ import requests
 import spacy
 import json
 import math
+from uni2ascii import uni2ascii
 
-TOTAL_SCORE_THRESHOLD = 7.5
-INDIVIDUAL_SCORE_THRESHOLD = 0.625
-TF_IDF_SURFACING_THRESHOLD = 0.08
-HARASSMENT_SCORE_THRESHOLD = 0.5 # TODO: MODIFY TO ACTUAL VALUE
+PERSPECTIVE_SCORE_THRESHOLD = 0.8
+ABUSIVE_MESSAGE_COUNT_THRESHOLD = 5
+ENTITY_SCORE_THRESHOLD = 10
+TF_IDF_SURFACING_THRESHOLD = 0.1
 
 class MessageProcessor:
     def __init__(self):
         with open('tokens.json') as f:
             self.perspective_key = json.load(f)['perspective']
         self.named_entity_model = spacy.load('en_core_web_sm')
-        self.entity_scores = {}
-        self.entity_mentions = {}
+        self.user_to_abusive_messages = {}
+        self.user_abuse_count = {}
         self.num_total_messages = 0
         self.token_document_frequency = {}
+        self.abused_entity_scores = {}
+        self.entity_mentions = {}
+        self.flagged_tokens = set()
 
+    # public method
     def process_message(self, message):
-        perspective_scores = self.eval_text(message)
-        entity_set, tokenized_message = self.eval_entities(message)
-        self.update_token_document_frequency(tokenized_message)
-        if any(score >= INDIVIDUAL_SCORE_THRESHOLD for score in perspective_scores.values()):
-            targeted_entities = self.update_targeted_entities(entity_set, perspective_scores, message, tokenized_message)
-            for entity_obj in targeted_entities:
-                entity = entity_obj['name']
-                mentions = entity_obj['mentions']
-                tf_idf_scores = self.compute_tf_idf_by_token(mentions)
-                return [token for token, score in tf_idf_scores.items() if score > TF_IDF_SURFACING_THRESHOLD]
+        user = message.author
+        message_content = uni2ascii(message.content)
+        perspective_scores = self.eval_text(message_content)
+        entity_set, tokenized_message = self.eval_entities(message_content)
+        self.update_message_ledger(tokenized_message)
+        if (any(score >= PERSPECTIVE_SCORE_THRESHOLD for score in perspective_scores.values()) or
+            any(token in tokenized_message for token in self.flagged_tokens)):
+            self.update_targeted_entities(entity_set, perspective_scores, message, tokenized_message)
+            self.user_to_abusive_messages[user] = self.user_to_abusive_messages.get(user, []) + [message]
+            self.user_abuse_count[user] = self.user_abuse_count.get(user, 0) + 1
 
+    def user_abuse_threshold_exceeded(self):
+        users_exceeding_threshold = []
+        for user, messages in self.user_to_abusive_messages.items():
+            if self.user_abuse_count[user] >= ABUSIVE_MESSAGE_COUNT_THRESHOLD:
+                users_exceeding_threshold.append((user, messages))
+                self.user_abuse_count[user] = 0
+        return users_exceeding_threshold
 
-    def eval_reported_message(self, message):
-        perspective_scores = self.eval_text(message)
-        targeted_entities = self.identify_targeted_entities(threshold=TOTAL_SCORE_THRESHOLD)
-        _, tokenized_message = self.eval_entities(message)
-        identified_harassment_entities = []
-        for entity_obj in targeted_entities:
-            entity = entity_obj['name']
-            if entity in tokenized_message:
-                identified_harassment_entities.append(entity_obj)
-        return perspective_scores, identified_harassment_entities
+    def entity_abuse_threshold_exceeded(self):
+        entities_exceeding_threshold = []
+        for entity, harassment_score in self.abused_entity_scores.items():
+            if harassment_score >= ENTITY_SCORE_THRESHOLD:
+                mentions = self.entity_mentions[entity]
+                entities_exceeding_threshold.append((entity, mentions))
+                self.abused_entity_scores[entity] = 0
+        return entities_exceeding_threshold
 
+    def update_flagged_tokens(self, tokens):
+        self.flagged_tokens.update(tokens)
 
+    # private methods
     def eval_text(self, message):
         '''
         Given a message string, forwards the message to Perspective and returns a dictionary of scores.
@@ -74,9 +87,9 @@ class MessageProcessor:
         for entity in entity_doc.ents:
             if entity.label_ == "PERSON" or entity.label_ == "NORP":
                 named_entities.add(entity.text)
-        return named_entities, [token.text for token in entity_doc]
+        return named_entities, [token.text.lower() for token in entity_doc]
 
-    def update_token_document_frequency(self, tokenized_message):
+    def update_message_ledger(self, tokenized_message):
         self.num_total_messages += 1
         for token in set(tokenized_message):
             self.token_document_frequency[token] = self.token_document_frequency.get(token, 0) + 1
@@ -88,43 +101,30 @@ class MessageProcessor:
         -- this collection represents the entities who are being targeted with harasssment. This method also logs
         each message the mentions any entity.
         '''
+        flagged_token_score = 0
+        for flagged_token in self.flagged_tokens:
+            if flagged_token in tokenized_message:
+                flagged_token_score += 1
         for entity in entity_set:
-            curr_score = self.entity_scores.get(entity, 0)
-            curr_score += self.threshold_get(perspective_scores, 'SEVERE_TOXICITY', INDIVIDUAL_SCORE_THRESHOLD)
-            curr_score += self.threshold_get(perspective_scores, 'TOXICITY', INDIVIDUAL_SCORE_THRESHOLD)
-            curr_score += self.threshold_get(perspective_scores, 'IDENTITY_ATTACK', INDIVIDUAL_SCORE_THRESHOLD)
-            curr_score += self.threshold_get(perspective_scores, 'THREAT', INDIVIDUAL_SCORE_THRESHOLD)
-            self.entity_scores[entity] = curr_score
+            curr_score = self.abused_entity_scores.get(entity, 0) + flagged_token_score
+            curr_score += self.threshold_get(perspective_scores, 'SEVERE_TOXICITY')
+            curr_score += self.threshold_get(perspective_scores, 'TOXICITY')
+            curr_score += self.threshold_get(perspective_scores, 'IDENTITY_ATTACK')
+            curr_score += self.threshold_get(perspective_scores, 'THREAT')
+            self.abused_entity_scores[entity] = curr_score
             self.entity_mentions[entity] = self.entity_mentions.get(entity, []) + [{
                 'original_message': message,
                 'tokenized_message': tokenized_message,
             }]
-        return self.identify_targeted_entities(threshold=TOTAL_SCORE_THRESHOLD)
 
-    def identify_targeted_entities(self, threshold):
+    def threshold_get(self, dictionary, key, threshold=PERSPECTIVE_SCORE_THRESHOLD):
         '''
-        Determines the set of entities whose total harassment score is greater than the given threshold and returns
-        those entities as a list. This list represents the set of entities who are being targeted with harassment.
-        '''
-        targeted_entities = []
-        for entity, harassment_score in self.entity_scores.items():
-            if harassment_score >= threshold:
-                mentions = self.entity_mentions[entity]
-                targeted_entities.append({
-                    'name': entity,
-                    'total_harassment_score': harassment_score,
-                    'avg_harassment_score': float(harassment_score / len(mentions)),
-                    'mentions': mentions, })
-        return targeted_entities
-
-    def threshold_get(self, dictionary, key, threshold):
-        '''
-        Grabs the value of the given key from the given dictionary as long as that value is at least the given threshold.
+        Returns 1 as long as the value of the given key in the given dictionary is at least the given threshold.
         If the value is not at least the threshold, then this method will return 0.
         '''
-        return dictionary[key] if dictionary[key] >= threshold else 0
+        return 1 if dictionary[key] >= threshold else 0
 
-    def compute_tf_idf_by_token(self, target_messages):
+    def compute_tf_idf_by_token(self, target_messages, threshold=TF_IDF_SURFACING_THRESHOLD):
         num_total_tokens = 0
         token_freq = {}
         for mention_obj in target_messages:
@@ -134,4 +134,4 @@ class MessageProcessor:
         tf_idf_scores = {}
         for token, freq in token_freq.items():
             tf_idf_scores[token] = (freq / num_total_tokens) * math.log(self.num_total_messages / self.token_document_frequency[token])
-        return tf_idf_scores
+        return [token for token, score in tf_idf_scores.items() if score > threshold]
