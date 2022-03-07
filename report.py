@@ -1,7 +1,7 @@
 from enum import Enum, auto
 import discord
 import re
-from verify_user import isVerified
+from twitter_user import getTwitterUser
 
 class State(Enum):
     REPORT_START = auto()
@@ -53,7 +53,7 @@ class Report:
         self.abuse_type = None
         self.targeted_harrassment = False
         self.targeted_harrassment_messages = set()
-        self.target_twitter_handle = None
+        self.target_twitter_info = None
         self.being_silenced = False
 
     def report_complete_message(self):
@@ -68,8 +68,8 @@ class Report:
                 for targeted_message in self.targeted_harrassment_messages:
                     reply += f"{targeted_message.author.name}: {targeted_message.content}\n"
                 reply += "```"
-            if self.target_twitter_handle:
-                reply += f"The Twitter handle `{self.target_twitter_handle}` will be forwarded to the Twitter abuse review team.\n"
+            if self.target_twitter_info:
+                reply += f"The Twitter handle `{self.target_twitter_info['handle']}` will be forwarded to the Twitter abuse review team.\n"
             if self.being_silenced:
                 reply += "We have flagged that this user is being silenced as part of the targeted harrassment campaign.\n"
             reply += "\n"
@@ -185,15 +185,6 @@ class Report:
                 self.state = State.CHECK_TARGETED_HARRASSMENT
                 reply = "Is this message part of a targeted harrassment campaign?\n"
                 reply += "Reply `yes` or `no`. For more information on what qualifies, type `info`"
-                # self.state = State.REPORT_COMPLETE
-                # reply = "Thank you for reporting.\n"
-                # reply += f"The following content has been flagged for review as `{self.abuse_type}` material:\n"
-                # reply += f"```{self.message.author.name}: {self.message.content}```\n"
-                # reply += "Our content moderation team will review this content and assess "
-                # reply += "next steps, potentially including removing content and contacting "
-                # reply += "local authorities.\n\n"
-                # reply += "In the meantime, consider blocking the user to prevent "
-                # reply += "further exposure to their content."
                 return [reply]
             else:
                 reply = f'Sorry, please reply with a number between 1 and {len(self.ABUSE_TYPES)}'
@@ -261,27 +252,34 @@ class Report:
             if len(message.content.split(' ')) > 1:
                 return ["Please enter a single word representing the Twitter handle, or type `skip`."]
 
+            target_twitter_handle = message.content
             if message.mentions:
-                self.target_twitter_handle = message.mentions[0].name
+                target_twitter_handle = message.mentions[0].name
             elif message.content[0] == '@':
-                self.target_twitter_handle = message.content[1:]
-            else:
-                self.target_twitter_handle = message.content
+                target_twitter_handle = message.content[1:]
 
-            user_found, user_verified = await isVerified(self.target_twitter_handle)
-            if user_found:
+            user_data = await getTwitterUser(target_twitter_handle)
+            if user_data:
+                self.target_twitter_info = {
+                    "handle": user_data[2][1:],
+                    "name": user_data[1],
+                    "bio": user_data[5][5:]
+                }
+                user_verified = 'Verified: True' in user_data
                 self.state = State.CHECK_BEING_SILENCED
                 reply = "We have identified the following "
                 if user_verified:
                     reply += "verified "
                 reply += "Twitter account as being targeted:\n"
-                reply += f"```Twitter Handle: @{self.target_twitter_handle}```\n"
+                reply += f"```Twitter Handle: @{target_twitter_handle}\n"
+                reply += f"Name: {user_data[1]}\n"
+                reply += f"{user_data[5]}\n"
+                reply += "```\n"
                 reply += "Is this user being silenced by the harrassment campaign? "
                 reply += "Does this threaten their open expression? Reply `yes` or `no`."
                 return [reply]
             else:
-                reply = f"Unable to find Twitter user `{self.target_twitter_handle}`. Please try another handle or type `skip`."
-                self.target_twitter_handle = None
+                reply = f"Unable to find Twitter user `{target_twitter_handle}`. Please try another handle or type `skip`."
                 return [reply]
 
 
@@ -295,7 +293,6 @@ class Report:
             else:
                 return ["Sorry, please reply with `yes` or `no`."]
 
-
         return []
 
     def gather_report_information(self):
@@ -307,7 +304,7 @@ class Report:
                 "abuse_type": self.abuse_type,
                 "targeted_harrassment": self.targeted_harrassment,
                 "targeted_harrassment_messages": self.targeted_harrassment_messages,
-                "target_twitter_handle": self.target_twitter_handle,
+                "target_twitter_info": self.target_twitter_info,
                 "being_silenced": self.being_silenced,
             }
         )

@@ -24,6 +24,10 @@ class ManualReview:
         self.author = report_info["author"]
         self.message = report_info["message"]
         self.abuse_type = report_info["abuse_type"]
+        self.targeted_harrassment = report_info["targeted_harrassment"]
+        self.targeted_harrassment_messages = report_info["targeted_harrassment_messages"]
+        self.target_twitter_info = report_info["target_twitter_info"]
+        self.being_silenced = report_info["being_silenced"]
         self.mod_channel = client.mod_channels[report_info["message"].guild.id]
         self.client = client
         self.reporting_channel = reporting_channel
@@ -48,8 +52,36 @@ class ManualReview:
                     "value": f'<@{self.message.author.id}> said:\n"{truncate_string(self.message.content)}" [[link]({self.message.jump_url})]',
                     "inline": False,
                 },
+                {
+                    "name": "Targeted Harrassment Campaign",
+                    "value": "Yes" if self.targeted_harrassment else "No",
+                    "inline": False,
+                },
             ]
         }
+        if len(self.targeted_harrassment_messages) > 0:
+            value = ""
+            for message in self.targeted_harrassment_messages:
+                value += f'<@{self.message.author.id}> said:\n"{truncate_string(self.message.content)}" [[link]({self.message.jump_url})]\n\n'
+            embed["fields"].append({
+                "name": "Messages in Harrassment Campaign",
+                "value": value,
+                "inline": False,
+            })
+        if self.target_twitter_info:
+            value = f"Handle: @{self.target_twitter_info['handle']}\n"
+            value += f"Name: {self.target_twitter_info['name']}\n"
+            value += f"Bio: {self.target_twitter_info['bio']}"
+            embed["fields"].append({
+                "name": "Harrassed Twitter User",
+                "value":  value,
+                "inline": True,
+            })
+        embed["fields"].append({
+            "name": "User being Silenced?",
+            "value":  self.being_silenced,
+            "inline": True,
+        })
         view = InitialMessageView(self.message, self.author, self.begin_review)
         if self.report_imminent_danger:
             view = InitialMessageViewDanger(self.message, self.mod_channel, self.author, self.begin_review)

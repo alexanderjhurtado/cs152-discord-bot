@@ -2,7 +2,7 @@ import twint
 import nest_asyncio
 import os
 
-async def isVerified(username):
+async def getTwitterUser(username):
     nest_asyncio.apply()
 
     c = twint.Config()
@@ -13,9 +13,11 @@ async def isVerified(username):
         f = open('user_info.txt')
         user_info = f.readline()
         print(user_info)
+        print(type(user_info))
+        user_data = user_info.split(' | ')
         f.close()
         os.remove('user_info.txt')
-        return True, 'Verified: True' in user_info
+        return user_data
     except:
         print('Sorry, we could not find this user')
-        return False, False
+        return []
