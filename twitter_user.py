@@ -12,8 +12,6 @@ async def getTwitterUser(username):
         twint.run.Lookup(c)
         f = open('user_info.txt')
         user_info = f.readline()
-        print(user_info)
-        print(type(user_info))
         user_data = user_info.split(' | ')
         f.close()
         os.remove('user_info.txt')

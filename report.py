@@ -10,8 +10,8 @@ class State(Enum):
     MESSAGE_IDENTIFIED = auto()
     IMMINENT_DANGER = auto()
     SELECT_ABUSE = auto()
-    CHECK_TARGETED_HARRASSMENT = auto()
-    ADD_HARRASSMENT_MESSAGES = auto()
+    CHECK_TARGETED_HARASSMENT = auto()
+    ADD_HARASSMENT_MESSAGES = auto()
     ADD_TWITTER_HANDLE = auto()
     CHECK_BEING_SILENCED = auto()
     REPORT_COMPLETE = auto()
@@ -29,7 +29,7 @@ class Report:
     ABUSE_DEFINITIONS = {
         "Bullying": "Intent to harm, intimidate, or coerce (someone perceived as vulnerable).",
         "Hate Speech": "Abusive or threatening speech or writing that expresses prejudice against a particular group, especially on the basis of race, religion, or sexual orientation.",
-        "Sexual Harrassment": "Content that depicts sexually explicit activities",
+        "Sexual Harassment": "Content that depicts sexually explicit activities",
         "Revealing Personal Information": "Content that exposes a user's personal, sensitive information without consent",
         "Advocating Violence": "Depiction of especially vivid, brutal and realistic acts of violence",
         "Other": "General category that includes all malicious content that is may be considered in violation of our guidelines",
@@ -38,7 +38,7 @@ class Report:
     ABUSE_TYPES = [
         "Bullying",
         "Hate Speech",
-        "Sexual Harrassment",
+        "Sexual Harassment",
         "Revealing Personal Information",
         "Advocating Violence",
         "Other"
@@ -51,8 +51,8 @@ class Report:
         self.message = None
         self.report_imminent_danger = False
         self.abuse_type = None
-        self.targeted_harrassment = False
-        self.targeted_harrassment_messages = set()
+        self.targeted_harassment = False
+        self.targeted_harassment_messages = set()
         self.target_twitter_info = None
         self.being_silenced = False
 
@@ -60,18 +60,18 @@ class Report:
         reply = "Thank you for reporting.\n"
         reply += f"The following content has been flagged for review as `{self.abuse_type}` material:\n"
         reply += f"```{self.message.author.name}: {self.message.content}```\n"
-        if self.targeted_harrassment:
-            reply += "We have also flagged this message as part of a targeted harrassment campaign.\n"
-            if len(self.targeted_harrassment_messages) > 0:
+        if self.targeted_harassment:
+            reply += "We have also flagged this message as part of a targeted harassment campaign.\n"
+            if len(self.targeted_harassment_messages) > 0:
                 reply += "The following content will be included as part of the report:\n"
                 reply += "```"
-                for targeted_message in self.targeted_harrassment_messages:
+                for targeted_message in self.targeted_harassment_messages:
                     reply += f"{targeted_message.author.name}: {targeted_message.content}\n"
                 reply += "```"
             if self.target_twitter_info:
                 reply += f"The Twitter handle `{self.target_twitter_info['handle']}` will be forwarded to the Twitter abuse review team.\n"
             if self.being_silenced:
-                reply += "We have flagged that this user is being silenced as part of the targeted harrassment campaign.\n"
+                reply += "We have flagged that this user is being silenced as part of the targeted harassment campaign.\n"
             reply += "\n"
         reply += "Our content moderation team will review this content and assess "
         reply += "next steps, potentially including removing content and contacting "
@@ -182,8 +182,8 @@ class Report:
                 return [reply]
             if message.content in [str(i+1) for i in range(len(self.ABUSE_TYPES))]:
                 self.abuse_type = self.ABUSE_TYPES[int(message.content) - 1]
-                self.state = State.CHECK_TARGETED_HARRASSMENT
-                reply = "Is this message part of a targeted harrassment campaign?\n"
+                self.state = State.CHECK_TARGETED_HARASSMENT
+                reply = "Is this message part of a targeted harassment campaign?\n"
                 reply += "Reply `yes` or `no`. For more information on what qualifies, type `info`"
                 return [reply]
             else:
@@ -191,10 +191,10 @@ class Report:
                 reply += self.select_abuse_message()
                 return [reply]
 
-        if self.state == State.CHECK_TARGETED_HARRASSMENT:
+        if self.state == State.CHECK_TARGETED_HARASSMENT:
             if message.content == self.YES_KEYWORD:
-                self.targeted_harrassment = True
-                self.state = State.ADD_HARRASSMENT_MESSAGES
+                self.targeted_harassment = True
+                self.state = State.ADD_HARASSMENT_MESSAGES
                 reply = "If you wish to report more messages as part of this campaign, please reply "
                 reply += "with each message link in separate messages. Once completed,"
                 reply += " or if you have no additional messages to report, type `done`."
@@ -203,7 +203,7 @@ class Report:
                 self.state = State.REPORT_COMPLETE
                 return [self.report_complete_message()]
             if message.content == self.INFO_KEYWORD:
-                reply = "A targeted harrassment campaign is any series of messages "
+                reply = "A targeted harassment campaign is any series of messages "
                 reply += "that qualify as abusive material aimed at a particular person or "
                 reply += "entity. These are often performed by multiple individuals, but can "
                 reply += "also stem from a single account."
@@ -211,11 +211,11 @@ class Report:
             else:
                 return ["Sorry, please reply with `yes`, `no`, or `info`."]
 
-        if self.state == State.ADD_HARRASSMENT_MESSAGES:
+        if self.state == State.ADD_HARASSMENT_MESSAGES:
             if message.content == self.DONE_KEYWORD:
                 self.state = State.ADD_TWITTER_HANDLE
                 reply = ""
-                if len(self.targeted_harrassment_messages) > 0:
+                if len(self.targeted_harassment_messages) > 0:
                     reply += "Thank you for reporting those additional messages.\n"
                 reply += "If you would like to add the Twitter handle of the "
                 reply += "user being targeted to your report, please type their handle below. "
@@ -236,7 +236,7 @@ class Report:
                 except discord.errors.NotFound:
                     return ["It seems this message was deleted or never existed. Please try again or say `done` to finish adding messages."]
                 if self.message != message:
-                    self.targeted_harrassment_messages.add(message)
+                    self.targeted_harassment_messages.add(message)
                 reply = "The following content was identified and added to the report:\n"
                 reply += f"```{message.author.name}: {message.content}```\n"
                 reply += "Please reply with another message link or type `done` to finish adding messages."
@@ -245,7 +245,7 @@ class Report:
         if self.state == State.ADD_TWITTER_HANDLE:
             if message.content == self.SKIP_KEYWORD:
                 self.state = State.CHECK_BEING_SILENCED
-                reply = "Is this user being silenced by the harrassment campaign? "
+                reply = "Is this user being silenced by the harassment campaign? "
                 reply += "Does this threaten their open expression? Reply `yes` or `no`."
                 return [reply]
 
@@ -275,7 +275,7 @@ class Report:
                 reply += f"Name: {user_data[1]}\n"
                 reply += f"{user_data[5]}\n"
                 reply += "```\n"
-                reply += "Is this user being silenced by the harrassment campaign? "
+                reply += "Is this user being silenced by the harassment campaign? "
                 reply += "Does this threaten their open expression? Reply `yes` or `no`."
                 return [reply]
             else:
@@ -302,8 +302,8 @@ class Report:
                 "message": self.message,
                 "report_imminent_danger": self.report_imminent_danger,
                 "abuse_type": self.abuse_type,
-                "targeted_harrassment": self.targeted_harrassment,
-                "targeted_harrassment_messages": self.targeted_harrassment_messages,
+                "targeted_harassment": self.targeted_harassment,
+                "targeted_harassment_messages": self.targeted_harassment_messages,
                 "target_twitter_info": self.target_twitter_info,
                 "being_silenced": self.being_silenced,
             }
