@@ -69,8 +69,7 @@ class ModBot(discord.Client):
             return
         # Check if this message was sent in a server ("guild") or if it's a DM
         if message.guild:
-            return
-            # await self.handle_channel_message(message)
+            await self.handle_channel_message(message)
         else:
             await self.handle_dm(message)
 
