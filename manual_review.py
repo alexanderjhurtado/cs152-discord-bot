@@ -32,8 +32,6 @@ class ManualReview:
         self.client = client
         self.kicked_users = set()
         self.reporting_channel = reporting_channel
-        self.displayed_harassment_campaign = False
-        self.case_ended = False
 
     async def initial_message(self):
         embed = {
@@ -86,9 +84,15 @@ class ManualReview:
                 "value":  "Yes" if self.being_silenced else "No",
                 "inline": True,
             })
-        view = InitialMessageView(self.message, self.author, self.begin_review)
-        if self.report_imminent_danger:
+        view = InitialMessageView(self.begin_review)
+        if self.report_imminent_danger and self.targeted_harassment:
+            view = InitialMessageViewDangerHarassment(self.message, self.mod_channel, self.author, self.begin_review, self.take_action_on_harassment)
+        elif self.report_imminent_danger:
             view = InitialMessageViewDanger(self.message, self.mod_channel, self.author, self.begin_review)
+        elif self.targeted_harassment:
+            view = InitialMessageViewHarassment(self.begin_review, self.take_action_on_harassment)
+
+        if self.report_imminent_danger:
             embed["description"] = "User is in imminent danger and wants the following info reported to the authorities."
             embed["color"] = 0xED1500
         try:
@@ -138,7 +142,7 @@ class ManualReview:
                 },
             ]
         }
-        view = ReturnUserView(message_to_user, self.reporting_channel, self.targeted_harassment, self.end_case, self.take_action_on_harassment)
+        view = ReturnUserView(message_to_user, self.reporting_channel)
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
 
     async def take_action_on_message(self):
@@ -146,23 +150,47 @@ class ManualReview:
             "title": "Take Action",
             "description": "How would you like to take action?",
         }
-        view = TakeActionView(self.message, self.mod_channel, self.reporting_channel, self.targeted_harassment, self.displayed_harassment_campaign, self.end_case, self.take_action_on_harassment, self.kicked_users)
+        view = TakeActionView(self.message, self.mod_channel, self.reporting_channel, self.kicked_users)
         await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
 
     async def take_action_on_harassment(self):
-        message_to_user = ""
-        sent_first_message = False
+        view = None
+        if self.target_twitter_info and len(self.targeted_harassment_messages) > 0:
+            view = TargetedHarassmentTwitterView(self.targeted_harassment_messages, self.target_twitter_info, self.mod_channel, self.reporting_channel, self.kicked_users)
+        elif self.target_twitter_info:
+            view = TwitterView(self.target_twitter_info, self.mod_channel)
+        elif len(self.targeted_harassment_messages) > 0:
+            view = TargetedHarassmentView(self.targeted_harassment_messages, self.reporting_channel, self.kicked_users)
+        else:
+            await self.mod_channel.send("No actions to take on harassment campaign; no reported messages or Twitter account.")
+            return
+
         primary_embed = {
             "title": "Targeted Harassment Campaign",
             "description": "How would you like to take action on the following user-reported harassment campaign and its associated messages?",
-            "fields": [
-                {
-                    "name": "Targeted Messages",
-                    "value": "",
-                    "inline": False,
-                },
-            ],
+            "fields": [],
         }
+        if self.target_twitter_info:
+            twitter_value = f"Handle: @{self.target_twitter_info['handle']}\n"
+            twitter_value += f"Name: {self.target_twitter_info['name']}\n"
+            twitter_value += f"Bio: {self.target_twitter_info['bio']}"
+            primary_embed["fields"].append({
+                "name": "Harrassed Twitter User",
+                "value":  twitter_value,
+                "inline": False,
+            })
+        if len(self.targeted_harassment_messages) == 0:
+            await self.mod_channel.send(embed=discord.Embed.from_dict(primary_embed), view=view)
+            return
+
+        primary_embed["fields"].append({
+            "name": "Targeted Messages",
+            "value": "",
+            "inline": False,
+        })
+
+        message_to_user = ""
+        sent_first_message = False
         secondary_embed = {
             "title": "Targeted Harassment Campaign (continued)",
             "fields": [
@@ -173,13 +201,10 @@ class ManualReview:
                 }
             ]
         }
-        view = TargetedHarassmentView(self.targeted_harassment_messages, self.end_case, self.kicked_users)
-        if self.target_twitter_info:
-            view = TargetedHarassmentViewTwitter(self.targeted_harassment_messages, self.target_twitter_info, self.mod_channel, self.end_case, self.kicked_users)
         for message in self.targeted_harassment_messages:
             if len(message_to_user) > 700:
                 if not sent_first_message:
-                    primary_embed["fields"][0]["value"] = message_to_user
+                    primary_embed["fields"][1 if self.target_twitter_info else 0]["value"] = message_to_user
                     sent_first_message = True
                     message_to_user = ""
                     await self.mod_channel.send(embed=discord.Embed.from_dict(primary_embed))
@@ -199,17 +224,6 @@ class ManualReview:
             await self.mod_channel.send(embed=discord.Embed.from_dict(secondary_embed), view=view)
 
 
-    async def end_case(self, message=None):
-        await self.client.terminate_case(
-            author_id=self.author.id,
-            manual_review_case_id=self.case_id,
-            message=message,
-            channel=self.reporting_channel
-        )
-        if not self.case_ended:
-            self.case_ended = True
-            await self.mod_channel.send("Thank you for taking action on this case. The report has been closed, but you are free to press any of the above buttons to continue taking action.")
-
 def truncate_string(string):
     '''
     Truncate string to a certain length and add ellipsis if appropriate
@@ -219,18 +233,37 @@ def truncate_string(string):
 
 
 class InitialMessageView(View):
-    def __init__(self, message, author, begin_review):
+    def __init__(self, begin_review):
         super().__init__()
-        self.message = message
-        self.author = author
         self.begin_review = begin_review
 
-    @discord.ui.button(label='Begin Review', style=discord.ButtonStyle.green)
+    @discord.ui.button(label='Review Reported Message', style=discord.ButtonStyle.green)
+    async def begin_review_callback(self, button, interaction):
+        button.label = 'Started Message Review'
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        await self.begin_review()
+
+
+class InitialMessageViewHarassment(View):
+    def __init__(self, begin_review, take_action_on_harassment):
+        super().__init__()
+        self.begin_review = begin_review
+        self.take_action_on_harassment = take_action_on_harassment
+
+    @discord.ui.button(label='Review Reported Message', style=discord.ButtonStyle.green)
     async def begin_review_callback(self, button, interaction):
         button.label = 'Started Review'
         button.disabled = True
         await interaction.response.edit_message(view=self)
         await self.begin_review()
+
+    @discord.ui.button(label='Review Harassment Campaign', style=discord.ButtonStyle.blurple)
+    async def review_harassment_callback(self, button, interaction):
+        button.label = 'Started Harassment Review'
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        await self.take_action_on_harassment()
 
 
 class InitialMessageViewDanger(View):
@@ -241,12 +274,47 @@ class InitialMessageViewDanger(View):
         self.author = author
         self.begin_review = begin_review
 
-    @discord.ui.button(label='Begin Review', style=discord.ButtonStyle.green)
+    @discord.ui.button(label='Review Reported Message', style=discord.ButtonStyle.green)
     async def begin_review_callback(self, button, interaction):
         button.label = 'Started Review'
         button.disabled = True
         await interaction.response.edit_message(view=self)
         await self.begin_review()
+
+    @discord.ui.button(label='Report to Authorities', style=discord.ButtonStyle.red)
+    async def report_authorities_callback(self, button, interaction):
+        button.label = 'Authorities Alerted'
+        button.disabled = True
+        message = "The authorities have been sent the following information:\n\n"
+        message += f"Reported by: {self.author}\n"
+        message += f'<@{self.message.author.id}> said:\n"{truncate_string(self.message.content)}"\n'
+        message += f'Link to message: {self.message.jump_url}'
+        await self.mod_channel.send(message)
+        await interaction.response.edit_message(view=self)
+
+
+class InitialMessageViewDangerHarassment(View):
+    def __init__(self, message, mod_channel, author, begin_review, take_action_on_harassment):
+        super().__init__()
+        self.message = message
+        self.mod_channel = mod_channel
+        self.author = author
+        self.begin_review = begin_review
+        self.take_action_on_harassment = take_action_on_harassment
+
+    @discord.ui.button(label='Review Reported Message', style=discord.ButtonStyle.green)
+    async def begin_review_callback(self, button, interaction):
+        button.label = 'Started Review'
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        await self.begin_review()
+
+    @discord.ui.button(label='Review Harassment Campaign', style=discord.ButtonStyle.blurple)
+    async def review_harassment_callback(self, button, interaction):
+        button.label = 'Started Harassment Review'
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        await self.take_action_on_harassment()
 
     @discord.ui.button(label='Report to Authorities', style=discord.ButtonStyle.red)
     async def report_authorities_callback(self, button, interaction):
@@ -282,13 +350,10 @@ class EvaluateAbuseView(View):
 
 
 class ReturnUserView(View):
-    def __init__(self, message, reporting_channel, targeted_harassment, end_case, take_action_on_harassment):
+    def __init__(self, message, reporting_channel):
         super().__init__()
         self.message = message
         self.reporting_channel = reporting_channel
-        self.targeted_harassment = targeted_harassment
-        self.end_case = end_case
-        self.take_action_on_harassment = take_action_on_harassment
 
     @discord.ui.button(label="Don't send", style=discord.ButtonStyle.red)
     async def cancel_callback(self, button, interaction):
@@ -296,10 +361,6 @@ class ReturnUserView(View):
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(view=self)
-        if self.targeted_harassment:
-            await self.take_action_on_harassment()
-        else:
-            await self.end_case()
 
     @discord.ui.button(label='Send', style=discord.ButtonStyle.green)
     async def send_callback(self, button, interaction):
@@ -308,22 +369,14 @@ class ReturnUserView(View):
             child.disabled = True
         await interaction.response.edit_message(view=self)
         await self.reporting_channel.send(self.message)
-        if self.targeted_harassment:
-            await self.take_action_on_harassment()
-        else:
-            await self.end_case()
 
 
 class TakeActionView(View):
-    def __init__(self, message, mod_channel, reporting_channel, targeted_harassment, displayed_harassment_campaign, end_case, take_action_on_harassment, kicked_users):
+    def __init__(self, message, mod_channel, reporting_channel, kicked_users):
         super().__init__()
         self.message = message
         self.mod_channel = mod_channel
         self.reporting_channel = reporting_channel
-        self.targeted_harassment = targeted_harassment
-        self.displayed_harassment_campaign = displayed_harassment_campaign
-        self.end_case = end_case
-        self.take_action_on_harassment = take_action_on_harassment
         self.kicked_users = kicked_users
 
     @discord.ui.button(label='Delete message', style=discord.ButtonStyle.gray)
@@ -336,12 +389,6 @@ class TakeActionView(View):
             await self.reporting_channel.send(f"The message you reported was deleted [`{self.message.author} said: \"{truncate_string(self.message.content)}\"`].")
         except:
             await self.mod_channel.send("Looks like that message was already deleted.")
-        if self.targeted_harassment:
-            if not self.displayed_harassment_campaign:
-                self.displayed_harassment_campaign = True
-                await self.take_action_on_harassment()
-        else:
-            await self.end_case()
 
     @discord.ui.button(label='Kick user', style=discord.ButtonStyle.red)
     async def kick_user_callback(self, button, interaction):
@@ -352,19 +399,13 @@ class TakeActionView(View):
             await self.reporting_channel.send(f"The user you reported [`{self.message.author}`] was kicked.")
             self.kicked_users.add(self.message.author)
         await interaction.response.edit_message(view=self)
-        if self.targeted_harassment:
-            if not self.displayed_harassment_campaign:
-                self.displayed_harassment_campaign = True
-                await self.take_action_on_harassment()
-        else:
-            await self.end_case()
 
 
 class TargetedHarassmentView(View):
-    def __init__(self, targeted_harassment_messages, end_case, kicked_users):
+    def __init__(self, targeted_harassment_messages, reporting_channel, kicked_users):
         super().__init__()
         self.targeted_harassment_messages = targeted_harassment_messages
-        self.end_case = end_case
+        self.reporting_channel = reporting_channel
         self.kicked_users = kicked_users
 
     @discord.ui.button(label='Delete all messages', style=discord.ButtonStyle.gray)
@@ -375,7 +416,7 @@ class TargetedHarassmentView(View):
         for message in self.targeted_harassment_messages:
             try:
                 await message.delete()
-                await self.end_case(f"The message you reported was deleted [`{message.author} said: \"{truncate_string(message.content)}\"`].")
+                await self.reporting_channel.send(f"The message you reported was deleted [`{message.author} said: \"{truncate_string(message.content)}\"`].")
             except discord.errors.NotFound as err:
                 pass
         await interaction.edit_original_message(view=self)
@@ -388,53 +429,70 @@ class TargetedHarassmentView(View):
         for message in self.targeted_harassment_messages:
             if message.author not in self.kicked_users:
                 await message.channel.send(f'{message.author} has been kicked.') # simulate user being kicked
-                await self.end_case(f"The user identified in the targeted harassment campain you reported, [`{message.author}`], was kicked.")
+                await self.reporting_channel.send(f"The user identified in the targeted harassment campain you reported, [`{message.author}`], was kicked.")
                 self.kicked_users.add(message.author)
         await interaction.edit_original_message(view=self)
 
-
-class TargetedHarassmentViewTwitter(View):
-    def __init__(self, targeted_harassment_messages, target_twitter_info, mod_channel, end_case, kicked_users):
+class TwitterView(View):
+    def __init__(self, target_twitter_info, mod_channel):
         super().__init__()
-        self.targeted_harassment_messages = targeted_harassment_messages
         self.target_twitter_info = target_twitter_info
         self.mod_channel = mod_channel
-        self.end_case = end_case
-        self.kicked_users = kicked_users
 
-    @discord.ui.button(label='Delete all messages', style=discord.ButtonStyle.gray)
-    async def delete_message_callback(self, button, interaction):
-        await interaction.response.defer()
-        button.label = 'Messages deleted'
-        button.disabled = True
-        for message in self.targeted_harassment_messages:
-            try:
-                await message.delete()
-                await self.end_case(f"The message you reported was deleted [`{message.author} said: \"{truncate_string(message.content)}\"`].")
-            except discord.errors.NotFound as err:
-                pass
-        await interaction.edit_original_message(view=self)
-
-    @discord.ui.button(label='Kick users', style=discord.ButtonStyle.red)
-    async def kick_user_callback(self, button, interaction):
-        await interaction.response.defer()
-        button.label = 'Users kicked'
-        button.disabled = True
-        for message in self.targeted_harassment_messages:
-            if message.author not in self.kicked_users:
-                await message.channel.send(f'{message.author} has been kicked.') # simulate user being kicked
-                await self.end_case(f"The user identified in the targeted harassment campain you reported, [`{message.author}`], was kicked.")
-                self.kicked_users.add(message.author)
-        await interaction.edit_original_message(view=self)
-
-    @discord.ui.button(label='Report Targeted User to Twitter', style=discord.ButtonStyle.blurple)
+    @discord.ui.button(label='Share Harassment with Twitter', style=discord.ButtonStyle.blurple)
     async def report_twitter_callback(self, button, interaction):
-        button.label = 'Twitter Alerted'
+        button.label = 'Sent to Twitter'
         button.disabled = True
-        message = "Twitter has been alerted that the following user may be the victim of a targeted harassment campaign:\n\n"
+        message = "Twitter has been alerted that the following user may be the victim of a targeted harassment campaign:\n"
         message += f"```Handle: {self.target_twitter_info['handle']}\n"
         message += f"Name: {self.target_twitter_info['name']}\n"
         message += f"Bio: {self.target_twitter_info['bio']}```"
         await self.mod_channel.send(message)
-        await self.end_case()
+        await interaction.response.edit_message(view=self)
+
+
+
+class TargetedHarassmentTwitterView(View):
+    def __init__(self, targeted_harassment_messages, target_twitter_info, mod_channel, reporting_channel, kicked_users):
+        super().__init__()
+        self.targeted_harassment_messages = targeted_harassment_messages
+        self.target_twitter_info = target_twitter_info
+        self.mod_channel = mod_channel
+        self.reporting_channel = reporting_channel
+        self.kicked_users = kicked_users
+
+    @discord.ui.button(label='Delete all messages', style=discord.ButtonStyle.gray)
+    async def delete_message_callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'Messages deleted'
+        button.disabled = True
+        for message in self.targeted_harassment_messages:
+            try:
+                await message.delete()
+                await self.reporting_channel.send(f"The message you reported was deleted [`{message.author} said: \"{truncate_string(message.content)}\"`].")
+            except discord.errors.NotFound as err:
+                pass
+        await interaction.edit_original_message(view=self)
+
+    @discord.ui.button(label='Kick users', style=discord.ButtonStyle.red)
+    async def kick_user_callback(self, button, interaction):
+        await interaction.response.defer()
+        button.label = 'Users kicked'
+        button.disabled = True
+        for message in self.targeted_harassment_messages:
+            if message.author not in self.kicked_users:
+                await message.channel.send(f'{message.author} has been kicked.') # simulate user being kicked
+                await self.reporting_channel.send(f"The user identified in the targeted harassment campain you reported, [`{message.author}`], was kicked.")
+                self.kicked_users.add(message.author)
+        await interaction.edit_original_message(view=self)
+
+    @discord.ui.button(label='Share Harassment with Twitter', style=discord.ButtonStyle.blurple)
+    async def report_twitter_callback(self, button, interaction):
+        button.label = 'Sent to Twitter'
+        button.disabled = True
+        message = "Twitter has been alerted that the following user may be the victim of a targeted harassment campaign:\n"
+        message += f"```Handle: {self.target_twitter_info['handle']}\n"
+        message += f"Name: {self.target_twitter_info['name']}\n"
+        message += f"Bio: {self.target_twitter_info['bio']}```"
+        await self.mod_channel.send(message)
         await interaction.response.edit_message(view=self)
