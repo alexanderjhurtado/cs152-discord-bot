@@ -63,11 +63,14 @@ class Report:
         if self.targeted_harassment:
             reply += "We have also flagged this message as part of a targeted harassment campaign.\n"
             if len(self.targeted_harassment_messages) > 0:
-                reply += "The following content will be included as part of the report:\n"
-                reply += "```"
+                harassment_messages = ""
+                reply += "The following content will be included as part of the report"
                 for targeted_message in self.targeted_harassment_messages:
-                    reply += f"{targeted_message.author.name}: {targeted_message.content}\n"
-                reply += "```"
+                    harassment_messages += f"{targeted_message.author.name}: {targeted_message.content}\n"
+                if len(harassment_messages) > 1000:
+                    reply += " (not all content displayed in this message)"
+                harassment_messages = self.truncate_string(harassment_messages)
+                reply += f":\n```{harassment_messages}```"
             if self.target_twitter_info:
                 reply += f"The Twitter handle `{self.target_twitter_info['handle']}` will be forwarded to the Twitter abuse review team.\n"
             if self.being_silenced:
@@ -308,6 +311,13 @@ class Report:
                 "being_silenced": self.being_silenced,
             }
         )
+
+    def truncate_string(self, string):
+        '''
+        Truncate string to a certain length and add ellipsis if appropriate
+        '''
+        TRUNCATION_LENGTH = 1000
+        return string[:TRUNCATION_LENGTH] + ("..." if len(string) > TRUNCATION_LENGTH else "")
 
     def report_complete(self):
         return self.state == State.REPORT_COMPLETE

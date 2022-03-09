@@ -121,27 +121,19 @@ class ModBot(discord.Client):
         if len(abusive_users) > 0:
             for user, messages in abusive_users:
                 await mod_channel.send(
-                    embed=AbuseWarningEmbed(messages), 
+                    embed=AbuseWarningEmbed(messages),
                     view=AbuseWarningView(messages))
         # identity and warn about targeted entities
         targeted_entities = self.message_processor.entity_abuse_threshold_exceeded()
         if len(targeted_entities) > 0:
             for entity, mentions in targeted_entities:
                 await mod_channel.send(
-                    embed=TargetedWarningEmbed(entity, mentions), 
+                    embed=TargetedWarningEmbed(entity, mentions),
                     view=TargetedWarningView(
-                        mentions, 
+                        mentions,
                         entity,
-                        self.message_processor, 
+                        self.message_processor,
                         mod_channel.send))
-
-    async def terminate_case(self, author_id, manual_review_case_id, message, channel):
-        if message:
-            await channel.send(message)
-        if author_id in self.reports:
-            self.reports.pop(author_id)
-        if manual_review_case_id in self.manual_reviews:
-            self.manual_reviews.pop(manual_review_case_id)
 
 
 client = ModBot(perspective_key)
