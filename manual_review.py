@@ -94,7 +94,6 @@ class ManualReview:
 
         if self.report_imminent_danger:
             embed["description"] = "User is in imminent danger and wants the following info reported to the authorities."
-            embed["color"] = 0xED1500
         try:
             await self.mod_channel.send(embed=discord.Embed.from_dict(embed), view=view)
         except:
