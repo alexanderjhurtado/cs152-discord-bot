@@ -205,22 +205,22 @@ class ManualReview:
                 if not sent_first_message:
                     primary_embed["fields"][1 if self.target_twitter_info else 0]["value"] = message_to_user
                     sent_first_message = True
-                    message_to_user = ""
                     await self.mod_channel.send(embed=discord.Embed.from_dict(primary_embed))
+                    message_to_user = ""
                 else:
                     secondary_embed["fields"][0]["value"] = message_to_user
-                    message_to_user = ""
                     await self.mod_channel.send(embed=discord.Embed.from_dict(secondary_embed))
+                    message_to_user = ""
             message_to_user += f'<@{message.author.id}> said:\n"{truncate_string(message.content)}" [[link]({message.jump_url})]\n'
         if not sent_first_message:
-            primary_embed["fields"][0]["value"] = message_to_user
+            primary_embed["fields"][1 if self.target_twitter_info else 0]["value"] = message_to_user
             sent_first_message = True
-            message_to_user = ""
             await self.mod_channel.send(embed=discord.Embed.from_dict(primary_embed), view=view)
+            message_to_user = ""
         else:
             secondary_embed["fields"][0]["value"] = message_to_user
-            message_to_user = ""
             await self.mod_channel.send(embed=discord.Embed.from_dict(secondary_embed), view=view)
+            message_to_user = ""
 
 
 def truncate_string(string):
