@@ -14,7 +14,8 @@ The bot also combats word substitutions by automatically detecting keywords asso
 ### User reporting and manual review flow
 This bot fleshes out a comprehensive abuse reporting and manual review flow via Discord DMs. It can handle batch reporting of messages for targeted harassment campaigns and integration  with Twitter for cross-platform reporting.
 
-### Demo + Credits
+### Demo, Poster, and Credits
 
 Here's a [video demo](https://www.youtube.com/watch?v=TznqDKTS0-g) of the Discord bot in action. 
-Credit to the CS 152 staff for providing code that handles connecting to Discord channels.
+You can also view our [accompanying poster](https://github.com/alexanderjhurtado/cs152-discord-bot/blob/main/team_12_final_poster.pdf) addressing the targeted harassment of journalists and our bot's implemention.
+Credit to the CS 152 staff for providing the code scaffolding of the Discord bot.
