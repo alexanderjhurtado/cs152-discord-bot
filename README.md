@@ -8,10 +8,11 @@ This particular bot handles two main components:
 
 ### Automated abuse detection
 This bot implements a user-friendly button UI that allows moderators to automatically detect and kick abusive users, delete their messages, and give them a warning in their direct messages.
-It also automatically detects keywords associated with targeted abuse campaigns using a variant of [tf-idf](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) to combat word substitutions.
+Targeted abuse is detected using Google's [Perspective API](https://www.perspectiveapi.com/) and named entity recognition.
+The bot also combats word substitutions by automatically detecting keywords associated with targeted abuse campaigns using a variant of [tf-idf](https://en.wikipedia.org/wiki/Tf%E2%80%93idf).
 
 ### User reporting and manual review flow
-This bot also fleshes out a abuse reporting and manual review flow via DMs. It handles batch reporting of messages and integration  with Twitter for cross-platform reporting
+This bot fleshes out a comprehensive abuse reporting and manual review flow via Discord DMs. It can handle batch reporting of messages for targeted harassment campaigns and integration  with Twitter for cross-platform reporting.
 
 ### Demo + Credits
 
