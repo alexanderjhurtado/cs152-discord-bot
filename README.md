@@ -1,6 +1,6 @@
 ## CS 152 Discord Bot
 
-This is a Discord bot created for the `CS 152: Trust and Safety Engineering` course at Stanford University (Fall 2021). 
+This is a Discord bot created for the `CS 152: Trust and Safety Engineering` course at Stanford University (Fall 2021) using [Discord.py](https://discordpy.readthedocs.io/en/stable/).
 This particular bot handles two main components: 
  1. the automated detection of targeted harassment campaigns, and 
  2. functionality allowing moderators to effectively manage user reporting and manual review using a button interface.
